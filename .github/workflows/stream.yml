@@ -1,4 +1,4 @@
-name: HLS Restreamer - Chrome Browser Fix
+Name: HLS Restreamer - Chrome Browser Fix
 
 on:
   workflow_dispatch:
@@ -55,6 +55,8 @@ jobs:
         import re
         import datetime
         import shutil
+        import urllib.request
+        import json
         from datetime import timedelta, timezone
         from http.server import SimpleHTTPRequestHandler, HTTPServer
         import threading
@@ -64,10 +66,20 @@ jobs:
         from selenium.webdriver.chrome.service import Service as ChromeService
         from webdriver_manager.chrome import ChromeDriverManager
         from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.common.keys import Keys
+
+        # 🔐 إعدادات التحكم عن بعد (قم بوضع بيانات الـ API الخاصة بك هنا)
+        FB_PAGE_ID = "1143287615542552"
+        FB_POST_ID = "61591711540229_122105325825390384"
+        FB_ACCESS_TOKEN = "EAANvxZBsQD30BR0Nn0kAQYFGmHcZBOZBedfuZBHWjRbpsf21WcCIjYaZARho35ACoeT7ciL2NjJIpgLMZAZCsZBgW4kHZBpRXTkcSLUXoOMFgGZAkjoZARLYZB6iZCZCvz4393TVd7REaKZBbkM9M3jH7kAujyOws5hLynwy9Oo340AJEoFzBqzUKdsqz6hdRn8pwoBx3CBaW3U"
+        CONTROL_API_URL = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}_{FB_POST_ID}?fields=message&access_token={FB_ACCESS_TOKEN}"
 
         INPUT_URL = "http://simpletv.uk:80/play/live.php?mac=00:1A:79:7C:4C:BD&stream=2085199&extension=ts&play_token=mtwmOd2vTX"
         HLS_DIR = os.path.abspath("hls_stream")
         morocco_tz = timezone(timedelta(hours=1))
+
+        # متغير عالمي للإشارة إلى المتصفح المفتوح حالياً لتسهيل التحكم به
+        active_driver = None
 
         def check_time_guard():
             now = datetime.datetime.now(morocco_tz)
@@ -84,7 +96,53 @@ jobs:
             seconds_until_shutdown = (stop_time - now).total_seconds()
             return min(18900, seconds_until_shutdown)
 
+        # 📡 خيط الاستماع الخلفي لقراءة الأوامر وتنفيذ الضغطات
+        def remote_control_listener():
+            global active_driver
+            last_command_id = ""
+            
+            while True:
+                # نعمل فقط إذا كان هناك متصفح نشط ومفتوح
+                if active_driver is not None:
+                    try:
+                        req = urllib.request.Request(CONTROL_API_URL, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(req, timeout=5) as response:
+                            data = json.loads(response.read().decode())
+                            message = data.get("message", "")
+                            
+                            try:
+                                cmd_data = json.loads(message)
+                                action = cmd_data.get("action")
+                                cmd_id = cmd_data.get("id")
+                                
+                                if action and cmd_id != last_command_id:
+                                    last_command_id = cmd_id
+                                    print(f"🎮 أمر مستلم: {action}")
+                                    
+                                    # إرسال المفاتيح للمتصفح المفتوح
+                                    driver = active_driver
+                                    if driver:
+                                        active_element = driver.switch_to.active_element
+                                        if action == "up":
+                                            active_element.send_keys(Keys.ARROW_UP)
+                                        elif action == "down":
+                                            active_element.send_keys(Keys.ARROW_DOWN)
+                                        elif action == "left":
+                                            active_element.send_keys(Keys.ARROW_LEFT)
+                                        elif action == "right":
+                                            active_element.send_keys(Keys.ARROW_RIGHT)
+                                        elif action == "click":
+                                            active_element.send_keys(Keys.ENTER)
+                                        print(f"✅ تم إرسال زر: {action}")
+                            except json.JSONDecodeError:
+                                pass
+                    except Exception as e:
+                        # نتفادى طباعة الأخطاء بكثافة لتجنب امتلاء سجلات التشغيل
+                        pass
+                time.sleep(1) # فحص الأوامر كل ثانية
+
         def start_screen_recording_pipeline():
+            global active_driver
             if os.path.exists(HLS_DIR):
                 shutil.rmtree(HLS_DIR)
             os.makedirs(HLS_DIR, exist_ok=True)
@@ -97,6 +155,7 @@ jobs:
             os.environ["PULSE_SINK"] = "VirtualSink"
 
             def stream_loop():
+                global active_driver
                 chrome_driver = None
                 while True:
                     if os.path.exists(HLS_DIR):
@@ -122,6 +181,9 @@ jobs:
                         )
                         chrome_driver.set_window_size(1280, 720)
                         chrome_driver.get(INPUT_URL)
+                        
+                        # تعيين المتصفح النشط لتبدأ عملية الاستماع بالتحكم فيه
+                        active_driver = chrome_driver
                     except Exception as e:
                         print(f"❌ خطأ أثناء تشغيل المتصفح: {e}")
                         time.sleep(5)
@@ -175,7 +237,9 @@ jobs:
 
                     try: record_proc.terminate()
                     except: pass
-                    try: chrome_driver.quit()
+                    try: 
+                        chrome_driver.quit()
+                        active_driver = None # تصفير المتصفح النشط عند الإغلاق لمنع الأخطاء
                     except: pass
                     time.sleep(2)
 
@@ -232,6 +296,11 @@ jobs:
 
         if __name__ == "__main__":
             check_time_guard()
+            
+            # 🎮 تشغيل خيط الاستماع للتحكم عن بعد بشكل متوازٍ ومستمر
+            t_ctrl = threading.Thread(target=remote_control_listener, daemon=True)
+            t_ctrl.start()
+            
             start_screen_recording_pipeline()
             
             t_srv = threading.Thread(target=run_custom_server, daemon=True)
