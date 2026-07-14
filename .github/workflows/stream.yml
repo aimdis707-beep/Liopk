@@ -1,0 +1,247 @@
+Name: HLS Restreamer - Chrome Browser Fix
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 🎯 توقيت المغرب: يشتغل السيرفر كل 5 ساعات (7:30 صباحاً، 12:30 ظهراً، 5:30 مساءً، 10:30 ليلاً)
+    - cron: '30 6,11,16,21 * * *'
+
+# 🔐 حل مشكلة التوقف: السيرفر الجديد ينهي السيرفر القديم فوراً ليستلم مكانه بدون أي تداخل في الروابط
+concurrency:
+  group: hls-stream-group
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  run-stream:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Tools & Google Chrome & Virtual Audio
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg python3 python3-pip curl git xvfb pulseaudio pulseaudio-utils
+        
+        # تثبيت متصفح جوجل كروم الرسمي
+        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+        echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+        sudo apt-get update
+        sudo apt-get install -y google-chrome-stable
+        
+        # تثبيت مكتبة التحكم بالمتصفح (Selenium) ومكتبة إدارته تلقائياً
+        pip3 install selenium webdriver-manager
+        
+        # تشغيل كرت الصوت الوهمي في الخلفية
+        pulseaudio -D --exit-idle-time=-1 || true
+        pactl load-module module-null-sink sink_name=VirtualSink || true
+        pactl set-default-sink VirtualSink || true
+        
+        curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+        chmod +x cloudflared
+        sudo mv cloudflared /usr/local/bin/
+
+    - name: Create and Run Stream Server
+      run: |
+        cat << 'EOF' > stream_server.py
+        import subprocess
+        import os
+        import time
+        import sys
+        import re
+        import datetime
+        import shutil
+        from datetime import timedelta, timezone
+        from http.server import SimpleHTTPRequestHandler, HTTPServer
+        import threading
+
+        # مكتبات التحكم بالمتصفح تلقائياً
+        from selenium import webdriver
+        from selenium.webdriver.chrome.service import Service as ChromeService
+        from webdriver_manager.chrome import ChromeDriverManager
+        from selenium.webdriver.chrome.options import Options
+
+        INPUT_URL = "http://simpletv.uk:80/play/live.php?mac=00:1A:79:7C:4C:BD&stream=2085199&extension=ts&play_token=mtwmOd2vTX"
+        HLS_DIR = os.path.abspath("hls_stream")
+        morocco_tz = timezone(timedelta(hours=1))
+
+        def check_time_guard():
+            now = datetime.datetime.now(morocco_tz)
+            current_hour_float = now.hour + now.minute / 60.0
+            if 2.0 <= current_hour_float < 7.5:
+                print("🚫 نظام الحماية: السيرفر خارج أوقات العمل المحددة. إغلاق آمن...")
+                sys.exit(0)
+
+        def get_sleep_duration():
+            now = datetime.datetime.now(morocco_tz)
+            stop_time = now.replace(hour=2, minute=0, second=0, microsecond=0)
+            if now.hour >= 2:
+                stop_time += timedelta(days=1)
+            seconds_until_shutdown = (stop_time - now).total_seconds()
+            return min(18900, seconds_until_shutdown)
+
+        def start_screen_recording_pipeline():
+            if os.path.exists(HLS_DIR):
+                shutil.rmtree(HLS_DIR)
+            os.makedirs(HLS_DIR, exist_ok=True)
+
+            print("🖥️ تشغيل الشاشة الافتراضية (Xvfb)...")
+            subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x720x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(2)
+            
+            os.environ["DISPLAY"] = ":99"
+            os.environ["PULSE_SINK"] = "VirtualSink"
+
+            def stream_loop():
+                chrome_driver = None
+                while True:
+                    if os.path.exists(HLS_DIR):
+                        for file in os.listdir(HLS_DIR):
+                            try:
+                                file_path = os.path.join(HLS_DIR, file)
+                                if os.path.isfile(file_path): os.remove(file_path)
+                            except: pass
+
+                    print("🌐 فتح المتصفح وتشغيل الفيديو...")
+                    try:
+                        chrome_options = Options()
+                        chrome_options.add_argument("--no-sandbox")
+                        chrome_options.add_argument("--disable-dev-shm-usage")
+                        chrome_options.add_argument("--start-fullscreen") # ملء الشاشة بالكامل
+                        chrome_options.add_argument("--autoplay-policy=no-user-gesture-required") # تشغيل الصوت تلقائياً بدون ضغط
+                        chrome_options.add_argument(f"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                        
+                        # تشغيل الكروم وتمرير مسار الشاشة الافتراضية له
+                        chrome_driver = webdriver.Chrome(
+                            service=ChromeService(ChromeDriverManager().install()),
+                            options=chrome_options
+                        )
+                        chrome_driver.set_window_size(1280, 720)
+                        chrome_driver.get(INPUT_URL)
+                    except Exception as e:
+                        print(f"❌ خطأ أثناء تشغيل المتصفح: {e}")
+                        time.sleep(5)
+                        continue
+
+                    time.sleep(5)
+
+                    print("📹 [OBS Style] جاري تسجيل شاشة المتصفح وصوتها...")
+                    record_cmd = [
+                        "ffmpeg",
+                        "-f", "x11grab", "-video_size", "1280x720", "-framerate", "20", "-thread_queue_size", "2048", "-i", ":99.0",
+                        "-f", "pulse", "-thread_queue_size", "2048", "-ac", "2", "-i", "VirtualSink.monitor",
+                        "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p", "-threads", "1", "-g", "40",
+                        "-c:a", "aac", "-b:a", "96k", "-async", "1",
+                        "-f", "hls",
+                        "-hls_time", "2", "-hls_list_size", "4", "-hls_flags", "delete_segments",
+                        os.path.join(HLS_DIR, "stream.m3u8")
+                    ]
+                    
+                    playlist_file = os.path.join(HLS_DIR, "stream.m3u8")
+                    with open("ffmpeg.log", "w") as f:
+                        record_proc = subprocess.Popen(record_cmd, stdout=f, stderr=f)
+                        
+                        last_mod_time = time.time()
+                        check_strike = time.time()
+                        while True:
+                            if os.path.exists(playlist_file):
+                                current_mod_time = os.path.getmtime(playlist_file)
+                                if current_mod_time != last_mod_time:
+                                    last_mod_time = current_mod_time
+                                    check_strike = time.time()
+                                elif time.time() - check_strike > 8:
+                                    print("🚨 رصد تجمد صامت في ملف البث! جاري إنعاش المتصفح...")
+                                    break
+                            else:
+                                check_strike = time.time()
+
+                            # التحقق مما إذا كان مسجل الـ FFmpeg قد توقف
+                            if record_proc.poll() is not None:
+                                print("⚠️ توقف مسجل البث!")
+                                break
+                            
+                            # التحقق من أن المتصفح لا يزال مستجيباً
+                            try:
+                                _ = chrome_driver.current_url
+                            except:
+                                print("⚠️ المتصفح واجه مشكلة أو تم إغلاقه!")
+                                break
+                                
+                            time.sleep(2)
+
+                    try: record_proc.terminate()
+                    except: pass
+                    try: chrome_driver.quit()
+                    except: pass
+                    time.sleep(2)
+
+            t = threading.Thread(target=stream_loop, daemon=True)
+            t.start()
+
+        def run_custom_server():
+            os.makedirs(HLS_DIR, exist_ok=True)
+            class IPTVStreamHandler(SimpleHTTPRequestHandler):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, directory=HLS_DIR, **kwargs)
+                def end_headers(self):
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', '*')
+                    super().end_headers()
+                def guess_type(self, path):
+                    if path.endswith('.m3u8'): return 'application/vnd.apple.mpegurl'
+                    if path.endswith('.ts'): return 'video/MP2T'
+                    return super().guess_type(path)
+            
+            server = HTTPServer(('0.0.0.0', 8000), IPTVStreamHandler)
+            server.serve_forever()
+
+        def update_github_playlist(stream_url):
+            try:
+                playlist_content = f'#EXTM3U\n#EXTINF:-1 tvg-name="Neo IPTV PRO" group-title="Live",Neo IPTV PRO\n{stream_url}/stream.m3u8\n'
+                main_dir = os.path.dirname(HLS_DIR)
+                with open(os.path.join(main_dir, "playlist.m3u"), "w") as f:
+                    f.write(playlist_content)
+                
+                subprocess.run(["git", "config", "--global", "user.name", "github-actions[bot]"], cwd=main_dir)
+                subprocess.run(["git", "config", "--global", "user.email", "github-actions[bot]@users.noreply.github.com"], cwd=main_dir)
+                subprocess.run(["git", "add", "playlist.m3u"], cwd=main_dir)
+                subprocess.run(["git", "commit", "-m", "🔄 Continuous Loop 5h15m via Chrome [skip ci]"], cwd=main_dir)
+                subprocess.run(["git", "push"], cwd=main_dir)
+                print("✅ تم تحديث الرابط بنجاح والسيرفر يعمل بمسار ثابت!")
+            except Exception as e:
+                print(f"⚠️ خطأ أثناء تحديث الملف: {e}")
+
+        def start_tunnel():
+            cmd = ["cloudflared", "tunnel", "--url", "http://localhost:8000"]
+            process = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            
+            while True:
+                line = process.stderr.readline()
+                if not line: break
+                if "trycloudflare.com" in line:
+                    match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line)
+                    if match:
+                        url = match.group(0)
+                        update_github_playlist(url)
+                        return
+
+        if __name__ == "__main__":
+            check_time_guard()
+            start_screen_recording_pipeline()
+            
+            t_srv = threading.Thread(target=run_custom_server, daemon=True)
+            t_srv.start()
+            
+            time.sleep(2)
+            start_tunnel()
+            
+            sleep_time = get_sleep_duration()
+            time.sleep(sleep_time)
+        EOF
+        
+        python3 stream_server.py
