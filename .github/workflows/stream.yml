@@ -1,12 +1,10 @@
-name: HLS Restreamer - YouTube Edition Fixed
+Name: HLS Restreamer - YouTube TV Edition
 
 on:
   workflow_dispatch:
   schedule:
-    # 🎯 يشتغل السيرفر كل 5 ساعات
     - cron: '30 6,11,16,21 * * *'
 
-# 🔐 إنهاء السيرفر القديم فوراً لمنع التداخل
 concurrency:
   group: hls-stream-group
   cancel-in-progress: true
@@ -28,16 +26,13 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y ffmpeg python3 python3-pip curl git xvfb pulseaudio pulseaudio-utils
         
-        # تثبيت متصفح جوجل كروم الرسمي (تم تصحيح المسار هنا ✅)
         wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
         echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
         sudo apt-get update
         sudo apt-get install -y google-chrome-stable
         
-        # تثبيت مكتبة التحكم بالمتصفح (Selenium) ومكتبة إدارته تلقائياً
         pip3 install selenium webdriver-manager
         
-        # تشغيل كرت الصوت الوهمي في الخلفية
         pulseaudio -D --exit-idle-time=-1 || true
         pactl load-module module-null-sink sink_name=VirtualSink || true
         pactl set-default-sink VirtualSink || true
@@ -61,7 +56,6 @@ jobs:
         from http.server import SimpleHTTPRequestHandler, HTTPServer
         import threading
 
-        # مكتبات التحكم بالمتصفح
         from selenium import webdriver
         from selenium.webdriver.chrome.service import Service as ChromeService
         from webdriver_manager.chrome import ChromeDriverManager
@@ -74,13 +68,13 @@ jobs:
         FB_ACCESS_TOKEN = "EAANvxZBsQD30BR0Nn0kAQYFGmHcZBOZBedfuZBHWjRbpsf21WcCIjYaZARho35ACoeT7ciL2NjJIpgLMZAZCsZBgW4kHZBpRXTkcSLUXoOMFgGZAkjoZARLYZB6iZCZCvz4393TVd7REaKZBbkM9M3jH7kAujyOws5hLynwy9Oo340AJEoFzBqzUKdsqz6hdRn8pwoBx3CBaW3U"
         CONTROL_API_URL = f"https://graph.facebook.com/v18.0/{FB_POST_ID}?fields=message&access_token={FB_ACCESS_TOKEN}"
 
-        # 📺 رابط يوتيوب الرسمي
-        INPUT_URL = "https://www.youtube.com"
+        # 📺 رابط يوتيوب المخصص للتلفزيون (Leanback UI) مع إخفاء الماوس تلقائياً
+        INPUT_URL = "https://www.youtube.com/tv"
         HLS_DIR = os.path.abspath("hls_stream")
 
         active_driver = None
 
-        # 📡 خيط الاستماع للتحكم والتنقل بين الفيديوهات
+        # 📡 خيط الاستماع للتحكم بطريقة الريموت كنترول (أزرار الكيبورد الفعالة)
         def remote_control_listener():
             global active_driver
             last_command_id = ""
@@ -100,37 +94,32 @@ jobs:
                                     driver = active_driver
                                     
                                     if driver:
+                                        # محاكاة الضغط على أزرار ريموت التلفاز الحقيقي
                                         actions = ActionChains(driver)
-                                        
-                                        # تفعيل التمرير (Scroll) والتحرك
                                         try:
-                                            if action == "down":
-                                                # التمرير لأسفل للتنقل بين الفيديوهات
-                                                driver.execute_script("window.scrollBy(0, 350);")
-                                                print("🖱️ تم التمرير لأسفل (Scroll Down)")
-                                            elif action == "up":
-                                                # التمرير لأعلى
-                                                driver.execute_script("window.scrollBy(0, -350);")
-                                                print("🖱️ تم التمرير لأعلى (Scroll Up)")
+                                            if action == "up":
+                                                actions.send_keys(Keys.ARROW_UP).perform()
+                                                print("📺 ريموت: اضغط للأعلى")
+                                            elif action == "down":
+                                                actions.send_keys(Keys.ARROW_DOWN).perform()
+                                                print("📺 ريموت: اضغط للأسفل")
                                             elif action == "left":
-                                                # حركة الماوس العادية لليسار
-                                                actions.move_by_offset(-120, 0).perform()
-                                                print("🖱️ تم تحريك الماوس لليسار")
+                                                actions.send_keys(Keys.ARROW_LEFT).perform()
+                                                print("📺 ريموت: اضغط لليسار")
                                             elif action == "right":
-                                                # حركة الماوس العادية لليمين
-                                                actions.move_by_offset(120, 0).perform()
-                                                print("🖱️ تم تحريك الماوس لليمين")
+                                                actions.send_keys(Keys.ARROW_RIGHT).perform()
+                                                print("📺 ريموت: اضغط لليمين")
                                             elif action == "click":
-                                                # الضغط لتشغيل الفيديو
-                                                actions.click().perform()
-                                                print("🖱️ تم النقر لتشغيل الفيديو")
-                                        except Exception as mouse_err:
-                                            print(f"⚠️ خطأ حركة: {mouse_err}")
+                                                # زر Enter لتشغيل الفيديو أو اختياره
+                                                actions.send_keys(Keys.ENTER).perform()
+                                                print("📺 ريموت: اضغط موافق (OK/Enter)")
+                                        except Exception as key_err:
+                                            print(f"⚠️ خطأ ريموت: {key_err}")
                             except Exception as parse_err:
                                 pass
                     except Exception as fetch_err:
                         pass
-                time.sleep(1)
+                time.sleep(0.5) # تقليل مدة الانتظار لاستجابة أسرع للريموت
 
         def start_screen_recording_pipeline():
             global active_driver
@@ -150,31 +139,31 @@ jobs:
                         chrome_options.add_argument("--disable-dev-shm-usage")
                         chrome_options.add_argument("--start-fullscreen")
                         chrome_options.add_argument("--disable-gpu")
-                        chrome_options.add_argument("--disable-infobars")
-                        # تخطي منع التشغيل التلقائي للصوت والفيديو
-                        chrome_options.add_argument("--autoplay-policy=no-user-gesture-required")
-                        chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                         
-                        # إيقاف خيارات الأتمتة التي تسبب تجميد المتصفح على data:,
+                        # 👁️ حيلة إخفاء مؤشر الماوس تماماً من الشاشة عن طريق كود مخصص في نظام العرض
+                        chrome_options.add_argument("--hide-scrollbars")
+                        
+                        # إيهام يوتيوب بأن المتصفح هو شاشة تلفزيون ذكية (مهم جداً لتفعيل واجهة التلفاز)
+                        user_agent = "Mozilla/5.0 (SmartHub; SMART-TV; U; WebOS; GyroD; LG NetCast.TV-2013) AppleWebKit/537.41 (KHTML, like Gecko) Edge/12.0"
+                        chrome_options.add_argument(f"user-agent={user_agent}")
+                        
+                        chrome_options.add_argument("--autoplay-policy=no-user-gesture-required")
                         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
                         chrome_options.add_experimental_option('useAutomationExtension', False)
 
                         active_driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=chrome_options)
                         active_driver.set_window_size(1280, 720)
                         
-                        # إجبار كروم على الذهاب إلى يوتيوب مباشرة وتجاوز أي تعليق
-                        print("🌐 جاري فتح موقع يوتيوب...")
+                        print("🌐 جاري تشغيل يوتيوب بوضع التلفاز المطور...")
                         active_driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
                             "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
                         })
                         active_driver.get(INPUT_URL)
-                        time.sleep(8) # انتظار كافٍ لضمان تحميل يوتيوب بالكامل
+                        time.sleep(10) # انتظار تحميل واجهة التلفزيون بالكامل
                         
-                        # تهيئة مؤشر الماوس بوضعه في منتصف الشاشة عند أول تشغيل
+                        # إخفاء الماوس برمجياً عبر حقن كود CSS يمنع ظهور الماوس
                         try:
-                            actions = ActionChains(active_driver)
-                            body = active_driver.find_element("tag name", "body")
-                            actions.move_to_element(body).perform()
+                            active_driver.execute_script("var style = document.createElement('style'); style.innerHTML = '* { cursor: none !important; }'; document.head.appendChild(style);")
                         except:
                             pass
 
@@ -187,7 +176,7 @@ jobs:
                         proc.terminate()
                         active_driver.quit()
                     except Exception as err:
-                        print(f"⚠️ خطأ في تشغيل المتصفح: {err}")
+                        print(f"⚠️ خطأ متصفح: {err}")
                         time.sleep(5)
             threading.Thread(target=stream_loop, daemon=True).start()
 
@@ -201,7 +190,7 @@ jobs:
 
         def update_github_playlist(url):
             try:
-                content = f'#EXTM3U\n#EXTINF:-1 tvg-name="YouTube Live" group-title="Live",YouTube\n{url}/stream.m3u8\n'
+                content = f'#EXTM3U\n#EXTINF:-1 tvg-name="YouTube TV" group-title="Live",YouTube TV\n{url}/stream.m3u8\n'
                 with open("playlist.m3u", "w") as f: f.write(content)
                 subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
                 subprocess.run(["git", "config", "--global", "user.email", "actions@github.com"])
