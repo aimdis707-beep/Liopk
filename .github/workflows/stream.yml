@@ -1,4 +1,4 @@
-name: HLS Restreamer - Chrome Browser Fix
+Name: HLS Restreamer - Chrome Browser Fix
 
 on:
   workflow_dispatch:
@@ -79,7 +79,7 @@ jobs:
 
         active_driver = None
 
-        # 📡 خيط الاستماع الخلفي للتحكم بالماوس
+        # 📡 خيط الاستماع الخلفي للتحكم بالماوس (تم تحديثه لحل مشكلة عدم الحركة نهائياً)
         def remote_control_listener():
             global active_driver
             last_command_id = ""
@@ -98,30 +98,35 @@ jobs:
                                     last_command_id = cmd_id
                                     driver = active_driver
                                     if driver:
-                                        # إنشاء كائن التحكم بالماوس
+                                        # إنشاء كائن التحكم
                                         actions = ActionChains(driver)
+                                        
+                                        # حل جذري: وضع الماوس أولاً في منتصف الصفحة (على عنصر body) لتنشيط موقعه
+                                        try:
+                                            body_element = driver.find_element("tag name", "body")
+                                            actions.move_to_element(body_element).perform()
+                                        except:
+                                            pass
+
+                                        # تنفيذ الحركة الفعلية
                                         try:
                                             if action == "up":
-                                                actions.move_by_offset(0, -50).perform()
+                                                actions.move_by_offset(0, -100).perform()
                                                 print("🖱️ تم تحريك الماوس للأعلى")
                                             elif action == "down":
-                                                actions.move_by_offset(0, 50).perform()
+                                                actions.move_by_offset(0, 100).perform()
                                                 print("🖱️ تم تحريك الماوس للأسفل")
                                             elif action == "left":
-                                                actions.move_by_offset(-50, 0).perform()
+                                                actions.move_by_offset(-100, 0).perform()
                                                 print("🖱️ تم تحريك الماوس لليسار")
                                             elif action == "right":
-                                                actions.move_by_offset(50, 0).perform()
+                                                actions.move_by_offset(100, 0).perform()
                                                 print("🖱️ تم تحريك الماوس لليمين")
                                             elif action == "click":
                                                 actions.click().perform()
                                                 print("🖱️ تم النقر بالماوس")
                                         except Exception as mouse_err:
-                                            # إرجاع المؤشر لمنتصف الصفحة في حال تخطى الحدود
-                                            try:
-                                                body = driver.find_element("tag name", "body")
-                                                actions.move_to_element(body).perform()
-                                            except: pass
+                                            print(f"⚠️ خطأ أثناء الحركة: {mouse_err}")
                             except Exception as parse_err:
                                 pass
                     except Exception as fetch_err:
