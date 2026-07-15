@@ -1,4 +1,4 @@
-Name: HLS Restreamer - YouTube Edition Fixed
+name: HLS Restreamer - YouTube Edition Fixed
 
 on:
   workflow_dispatch:
