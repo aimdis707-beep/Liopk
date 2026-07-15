@@ -1,4 +1,4 @@
-name: Mobile-Mode HLS Restreamer - Smart Click Fixed
+name: Mobile-Mode HLS Restreamer - Auto Play First Video
 
 on:
   workflow_dispatch:
@@ -108,7 +108,7 @@ jobs:
                                             actions.send_keys(Keys.ARROW_UP).perform()
                                             print("⌨️ كيبورد: سهم لأعلى")
                                         elif action == "click":
-                                            # 🎯 نقرة ذكية ومباشرة على أول فيديو لتفادي الطبقة الشفافة
+                                            # 🎯 نقرة ذكية على الفيديو النشط حالياً أو تشغيل فيديو آخر
                                             js_click_video = """
                                             var videoCard = document.querySelector('ytm-media-item, ytm-video-with-context-renderer, a.media-item-thumbnail-container, a[href*="/watch"]');
                                             if (videoCard) {
@@ -120,7 +120,7 @@ jobs:
                                             }
                                             """
                                             driver.execute_script(js_click_video)
-                                            print("🚀 تم إرسال نقرة ذكية لتشغيل الفيديو مباشرة!")
+                                            print("🚀 تم إرسال نقرة ذكية لتشغيل الفيديو!")
                                             
                             except Exception as parse_err:
                                 pass
@@ -149,10 +149,10 @@ jobs:
                         chrome_options.add_argument("--disable-gpu")
                         chrome_options.add_argument("--hide-scrollbars")
                         
-                        # 📲 محاكاة متصفح الهاتف يدوياً وبدقة
+                        # 📲 محاكاة متصفح الهاتف
                         mobile_emulation = {
                             "deviceMetrics": { "width": 400, "height": 800, "pixelRatio": 3.0, "touch": True },
-                            "userAgent": "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
+                            "userAgent": "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, integrate Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
                         }
                         chrome_options.add_experimental_option("mobileEmulation", mobile_emulation)
                         chrome_options.add_argument("--autoplay-policy=no-user-gesture-required")
@@ -161,9 +161,25 @@ jobs:
                         active_driver.set_window_size(400, 800)
                         
                         active_driver.get(INPUT_URL)
-                        time.sleep(10)
+                        time.sleep(8) # انتظار تحميل صفحة البحث
                         
-                        # ستايل إبراز العنصر المحدد بإطار أحمر وتأثير لمس
+                        # ⚡ تشغيل أول فيديو تلقائياً بمجرد فتح الصفحة
+                        try:
+                            js_click_first = """
+                            var firstVideo = document.querySelector('ytm-media-item, ytm-video-with-context-renderer, a.media-item-thumbnail-container, a[href*="/watch"]');
+                            if (firstVideo) {
+                                firstVideo.click();
+                                console.log("✅ First video launched automatically!");
+                            }
+                            """
+                            active_driver.execute_script(js_click_first)
+                            print("🎉 تم تشغيل أول فيديو تلقائياً بنجاح!")
+                        except Exception as auto_err:
+                            print(f"⚠️ فشل التشغيل التلقائي: {auto_err}")
+
+                        time.sleep(2)
+
+                        # ستايل إبراز العناصر النشطة
                         try:
                             active_driver.execute_script("""
                                 var style = document.createElement('style');
