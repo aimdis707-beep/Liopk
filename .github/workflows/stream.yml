@@ -1,4 +1,4 @@
-Name: HLS Restreamer - Chrome Browser Fix
+name: HLS Restreamer - Chrome Browser Fix
 
 on:
   workflow_dispatch:
