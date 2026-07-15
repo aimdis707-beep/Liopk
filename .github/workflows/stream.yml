@@ -1,4 +1,4 @@
-Name: HLS Restreamer - YouTube Classic TV Control
+name: HLS Restreamer - YouTube Classic TV Control
 
 on:
   workflow_dispatch:
