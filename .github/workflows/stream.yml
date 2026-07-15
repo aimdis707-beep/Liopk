@@ -1,4 +1,4 @@
-name: HLS Restreamer - Chrome Browser Fix
+Name: HLS Restreamer - Chrome Browser Fix
 
 on:
   workflow_dispatch:
@@ -58,7 +58,6 @@ jobs:
         import shutil
         import urllib.request
         import json
-        from datetime import timedelta, timezone
         from http.server import SimpleHTTPRequestHandler, HTTPServer
         import threading
 
@@ -71,30 +70,14 @@ jobs:
         from selenium.webdriver.common.action_chains import ActionChains
 
         # 🔐 إعدادات التحكم عن بعد
-        FB_PAGE_ID = "1143287615542552"
         FB_POST_ID = "61591711540229_122105325825390384"
         FB_ACCESS_TOKEN = "EAANvxZBsQD30BR0Nn0kAQYFGmHcZBOZBedfuZBHWjRbpsf21WcCIjYaZARho35ACoeT7ciL2NjJIpgLMZAZCsZBgW4kHZBpRXTkcSLUXoOMFgGZAkjoZARLYZB6iZCZCvz4393TVd7REaKZBbkM9M3jH7kAujyOws5hLynwy9Oo340AJEoFzBqzUKdsqz6hdRn8pwoBx3CBaW3U"
-        CONTROL_API_URL = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}_{FB_POST_ID}?fields=message&access_token={FB_ACCESS_TOKEN}"
+        CONTROL_API_URL = f"https://graph.facebook.com/v18.0/{FB_POST_ID}?fields=message&access_token={FB_ACCESS_TOKEN}"
 
         INPUT_URL = "http://simpletv.uk:80/play/live.php?mac=00:1A:79:7C:4C:BD&stream=2085199&extension=ts&play_token=mtwmOd2vTX"
         HLS_DIR = os.path.abspath("hls_stream")
-        morocco_tz = timezone(timedelta(hours=1))
 
         active_driver = None
-
-        def check_time_guard():
-            now = datetime.datetime.now(morocco_tz)
-            current_hour_float = now.hour + now.minute / 60.0
-            # حماية لمنع التشغيل غير الضروري في أوقات محددة
-            if 2.0 <= current_hour_float < 7.5:
-                print("⏳ خارج أوقات التشغيل المحددة. إغلاق آمن...")
-                sys.exit(0)
-
-        def get_sleep_duration():
-            now = datetime.datetime.now(morocco_tz)
-            stop_time = now.replace(hour=2, minute=0, second=0, microsecond=0)
-            if now.hour >= 2: stop_time += timedelta(days=1)
-            return min(18900, (stop_time - now).total_seconds())
 
         # 📡 خيط الاستماع الخلفي للتحكم بالماوس
         def remote_control_listener():
@@ -115,27 +98,34 @@ jobs:
                                     last_command_id = cmd_id
                                     driver = active_driver
                                     if driver:
-                                        # إنشاء كائن التحكم بالإيماءات (الماوس)
+                                        # إنشاء كائن التحكم بالماوس
                                         actions = ActionChains(driver)
                                         try:
                                             if action == "up":
                                                 actions.move_by_offset(0, -50).perform()
+                                                print("🖱️ تم تحريك الماوس للأعلى")
                                             elif action == "down":
                                                 actions.move_by_offset(0, 50).perform()
+                                                print("🖱️ تم تحريك الماوس للأسفل")
                                             elif action == "left":
                                                 actions.move_by_offset(-50, 0).perform()
+                                                print("🖱️ تم تحريك الماوس لليسار")
                                             elif action == "right":
                                                 actions.move_by_offset(50, 0).perform()
+                                                print("🖱️ تم تحريك الماوس لليمين")
                                             elif action == "click":
                                                 actions.click().perform()
+                                                print("🖱️ تم النقر بالماوس")
                                         except Exception as mouse_err:
-                                            # في حال الخروج عن حدود الشاشة يتم تصفير الموقع بالتحرك نحو عنصر بالصفحة وإعادة المحاولة
+                                            # إرجاع المؤشر لمنتصف الصفحة في حال تخطى الحدود
                                             try:
                                                 body = driver.find_element("tag name", "body")
                                                 actions.move_to_element(body).perform()
                                             except: pass
-                            except: pass
-                    except: pass
+                            except Exception as parse_err:
+                                pass
+                    except Exception as fetch_err:
+                        pass
                 time.sleep(1)
 
         def start_screen_recording_pipeline():
@@ -200,7 +190,6 @@ jobs:
                 if not line:
                     time.sleep(1)
                     continue
-                # فحص آمن للتأكد من وجود رابط متاح في السطر قبل استخراجه لمنع انهيار السكربت
                 match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line)
                 if match:
                     url = match.group(0)
@@ -209,13 +198,13 @@ jobs:
                     break
 
         if __name__ == "__main__":
-            check_time_guard()
             threading.Thread(target=remote_control_listener, daemon=True).start()
             start_screen_recording_pipeline()
             threading.Thread(target=run_custom_server, daemon=True).start()
             time.sleep(3) # تأكيد عمل السيرفر قبل بدء النفق
             start_tunnel()
-            time.sleep(get_sleep_duration())
+            # السيرفر يبقى يعمل لمدة 5 ساعات بشكل مستمر حتى تبدأ الجولة التالية
+            time.sleep(18000)
         EOF
         
         python3 stream_server.py
