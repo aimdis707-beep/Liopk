@@ -1,16 +1,11 @@
-name: HLS Restreamer - Ultimate Fast TV Control
+Name: HLS Restreamer - Ultimate Robust Control
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '30 6,11,16,21 * * *'
 
 concurrency:
   group: hls-stream-group
   cancel-in-progress: true
-
-permissions:
-  contents: write
 
 jobs:
   run-stream:
@@ -21,22 +16,11 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Setup Tools & Google Chrome & Virtual Audio
+    - name: Setup Tools
       run: |
         sudo apt-get update
         sudo apt-get install -y ffmpeg python3 python3-pip curl git xvfb pulseaudio pulseaudio-utils
-        
-        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-        echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-        sudo apt-get update
-        sudo apt-get install -y google-chrome-stable
-        
         pip3 install selenium webdriver-manager
-        
-        pulseaudio -D --exit-idle-time=-1 || true
-        pactl load-module module-null-sink sink_name=VirtualSink || true
-        pactl set-default-sink VirtualSink || true
-        
         curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
         chmod +x cloudflared
         sudo mv cloudflared /usr/local/bin/
@@ -44,203 +28,70 @@ jobs:
     - name: Create and Run Stream Server
       run: |
         cat << 'EOF' > stream_server.py
-        import subprocess
-        import os
-        import time
-        import sys
-        import re
-        import datetime
-        import shutil
-        import urllib.request
-        import json
+        import subprocess, os, time, shutil, urllib.request, json, threading
         from http.server import SimpleHTTPRequestHandler, HTTPServer
-        import threading
-
         from selenium import webdriver
-        from selenium.webdriver.chrome.service import Service as ChromeService
-        from webdriver_manager.chrome import ChromeDriverManager
+        from selenium.webdriver.chrome.service import Service
         from selenium.webdriver.chrome.options import Options
-        from selenium.webdriver.common.keys import Keys
-        from selenium.webdriver.common.action_chains import ActionChains
+        from webdriver_manager.chrome import ChromeDriverManager
 
-        # 🔐 إعدادات التحكم عن بعد
         FB_POST_ID = "61591711540229_122105325825390384"
         FB_ACCESS_TOKEN = "EAANvxZBsQD30BR0Nn0kAQYFGmHcZBOZBedfuZBHWjRbpsf21WcCIjYaZARho35ACoeT7ciL2NjJIpgLMZAZCsZBgW4kHZBpRXTkcSLUXoOMFgGZAkjoZARLYZB6iZCZCvz4393TVd7REaKZBbkM9M3jH7kAujyOws5hLynwy9Oo340AJEoFzBqzUKdsqz6hdRn8pwoBx3CBaW3U"
         CONTROL_API_URL = f"https://graph.facebook.com/v18.0/{FB_POST_ID}?fields=message&access_token={FB_ACCESS_TOKEN}"
-
-        # 📺 استخدام يوتيوب المستقر تماماً ضد الحظر
-        INPUT_URL = "https://www.youtube.com"
         HLS_DIR = os.path.abspath("hls_stream")
-
         active_driver = None
 
-        # 📡 خيط الاستماع والتحكم الذكي الفوري بالأسهم
         def remote_control_listener():
             global active_driver
             last_command_id = ""
             while True:
-                if active_driver is not None:
+                if active_driver:
                     try:
                         req = urllib.request.Request(CONTROL_API_URL, headers={'User-Agent': 'Mozilla/5.0'})
                         with urllib.request.urlopen(req, timeout=5) as response:
                             data = json.loads(response.read().decode())
                             message = data.get("message", "")
-                            try:
-                                cmd_data = json.loads(message)
-                                action = cmd_data.get("action")
-                                cmd_id = cmd_data.get("id")
-                                if action and cmd_id != last_command_id:
-                                    last_command_id = cmd_id
-                                    driver = active_driver
-                                    
-                                    if driver:
-                                        actions = ActionChains(driver)
-                                        try:
-                                            # محاكاة ضغطات ريموت حقيقية وسريعة جداً
-                                            if action == "right":
-                                                actions.send_keys(Keys.ARROW_RIGHT).perform()
-                                                print("📺 ريموت: سهم يمين")
-                                            elif action == "left":
-                                                actions.send_keys(Keys.ARROW_LEFT).perform()
-                                                print("📺 ريموت: سهم يسار")
-                                            elif action == "down":
-                                                actions.send_keys(Keys.ARROW_DOWN).perform()
-                                                print("📺 ريموت: سهم أسفل")
-                                            elif action == "up":
-                                                actions.send_keys(Keys.ARROW_UP).perform()
-                                                print("📺 ريموت: سهم أعلى")
-                                            elif action == "click":
-                                                actions.send_keys(Keys.ENTER).perform()
-                                                print("📺 ريموت: تشغيل (ENTER)")
-                                        except Exception as key_err:
-                                            print(f"⚠️ خطأ ريموت: {key_err}")
-                            except Exception as parse_err:
-                                pass
-                    except Exception as fetch_err:
-                        pass
-                time.sleep(0.2)
+                            cmd_data = json.loads(message)
+                            action = cmd_data.get("action")
+                            cmd_id = cmd_data.get("id")
+                            if action and cmd_id != last_command_id:
+                                last_command_id = cmd_id
+                                # تنفيذ أمر JavaScript مباشر في المتصفح
+                                key_map = {"up": "ArrowUp", "down": "ArrowDown", "left": "ArrowLeft", "right": "ArrowRight", "click": "Enter"}
+                                js_cmd = f"document.dispatchEvent(new KeyboardEvent('keydown', {{key: '{key_map[action]}', bubbles: true}}));"
+                                active_driver.execute_script(js_cmd)
+                                print(f"🚀 تم تنفيذ أمر: {action}")
+                    except: pass
+                time.sleep(0.5)
 
-        def start_screen_recording_pipeline():
+        def start_stream():
             global active_driver
-            if os.path.exists(HLS_DIR): shutil.rmtree(HLS_DIR)
             os.makedirs(HLS_DIR, exist_ok=True)
-            subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x720x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(2)
+            subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x720x24"], stdout=subprocess.DEVNULL)
             os.environ["DISPLAY"] = ":99"
-            os.environ["PULSE_SINK"] = "VirtualSink"
+            
+            opts = Options()
+            opts.add_argument("--no-sandbox")
+            opts.add_argument("--headless=new")
+            driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
+            active_driver = driver
+            driver.set_window_size(1280, 720)
+            driver.get("https://www.youtube.com")
+            
+            # تسجيل عملية ffmpeg
+            subprocess.Popen(["ffmpeg", "-f", "x11grab", "-video_size", "1280x720", "-i", ":99.0", "-f", "hls", "-hls_time", "2", os.path.join(HLS_DIR, "stream.m3u8")])
+            
+            # حلقة بقاء المتصفح
+            while True: time.sleep(10)
 
-            def stream_loop():
-                global active_driver
-                while True:
-                    try:
-                        chrome_options = Options()
-                        chrome_options.add_argument("--no-sandbox")
-                        chrome_options.add_argument("--disable-dev-shm-usage")
-                        chrome_options.add_argument("--start-fullscreen")
-                        chrome_options.add_argument("--disable-gpu")
-                        chrome_options.add_argument("--hide-scrollbars")
-                        
-                        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-                        chrome_options.add_argument(f"user-agent={user_agent}")
-                        
-                        chrome_options.add_argument("--autoplay-policy=no-user-gesture-required")
-                        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-                        chrome_options.add_experimental_option('useAutomationExtension', False)
-
-                        active_driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=chrome_options)
-                        active_driver.set_window_size(1280, 720)
-                        
-                        print("🌐 جاري تشغيل يوتيوب المستقر مع نظام التصفح بالأسهم...")
-                        active_driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-                            "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-                        })
-                        active_driver.get(INPUT_URL)
-                        time.sleep(10)
-                        
-                        # 👁️ حقن ستايل لإخفاء الماوس وإضافة تظليل أحمر واضح حول الفيديو المحدد بالأسهم لسهولة التحكم
-                        try:
-                            js_nav_script = """
-                            var style = document.createElement('style');
-                            style.innerHTML = '* { cursor: none !important; } :focus { outline: 5px solid red !important; outline-offset: 2px !important; }';
-                            document.head.appendChild(style);
-                            
-                            // تفعيل التنقل بالأسهم تلقائياً داخل يوتيوب العادي
-                            document.addEventListener('keydown', function(e) {
-                                var focusable = document.querySelectorAll('ytd-rich-item-renderer, ytd-video-renderer, a#video-title, ytd-compact-video-renderer');
-                                if(focusable.length == 0) return;
-                                var index = Array.prototype.indexOf.call(focusable, document.activeElement);
-                                
-                                if (e.key === 'ArrowRight') {
-                                    if(index < focusable.length - 1) focusable[index + 1].focus();
-                                    else focusable[0].focus();
-                                    e.preventDefault();
-                                } else if (e.key === 'ArrowLeft') {
-                                    if(index > 0) focusable[index - 1].focus();
-                                    else focusable[focusable.length - 1].focus();
-                                    e.preventDefault();
-                                }
-                            });
-                            """
-                            active_driver.execute_script(js_nav_script)
-                        except:
-                            pass
-
-                        record_cmd = ["ffmpeg", "-f", "x11grab", "-video_size", "1280x720", "-framerate", "20", "-i", ":99.0", "-f", "pulse", "-ac", "2", "-i", "VirtualSink.monitor", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "96k", "-f", "hls", "-hls_time", "2", "-hls_list_size", "4", os.path.join(HLS_DIR, "stream.m3u8")]
-                        proc = subprocess.Popen(record_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        while proc.poll() is None:
-                            time.sleep(5)
-                            try: _ = active_driver.current_url
-                            except: break
-                        proc.terminate()
-                        active_driver.quit()
-                    except Exception as err:
-                        print(f"⚠️ خطأ متصفح: {err}")
-                        time.sleep(5)
-            threading.Thread(target=stream_loop, daemon=True).start()
-
-        def run_custom_server():
-            class Handler(SimpleHTTPRequestHandler):
-                def __init__(self, *args, **kwargs): super().__init__(*args, directory=HLS_DIR, **kwargs)
-                def end_headers(self): 
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    super().end_headers()
-            HTTPServer(('0.0.0.0', 8000), Handler).serve_forever()
-
-        def update_github_playlist(url):
-            try:
-                content = f'#EXTM3U\n#EXTINF:-1 tvg-name="YouTube TV" group-title="Live",YouTube TV\n{url}/stream.m3u8\n'
-                with open("playlist.m3u", "w") as f: f.write(content)
-                subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
-                subprocess.run(["git", "config", "--global", "user.email", "actions@github.com"])
-                subprocess.run(["git", "add", "playlist.m3u"])
-                subprocess.run(["git", "commit", "-m", "update playlist"])
-                subprocess.run(["git", "push"])
-            except Exception as e:
-                print(f"⚠️ فشل تحديث Git: {e}")
-
-        def start_tunnel():
-            print("🚀 بدء نفق Cloudflare...")
-            cmd = ["cloudflared", "tunnel", "--url", "http://localhost:8000"]
-            proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-            while True:
-                line = proc.stderr.readline()
-                if not line:
-                    time.sleep(1)
-                    continue
-                match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line)
-                if match:
-                    url = match.group(0)
-                    print(f"🔗 تم إنشاء الرابط بنجاح: {url}")
-                    update_github_playlist(url)
-                    break
-
-        if __name__ == "__main__":
-            threading.Thread(target=remote_control_listener, daemon=True).start()
-            start_screen_recording_pipeline()
-            threading.Thread(target=run_custom_server, daemon=True).start()
-            time.sleep(3)
-            start_tunnel()
-            time.sleep(18000)
-        EOF
+        threading.Thread(target=remote_control_listener, daemon=True).start()
+        threading.Thread(target=start_stream, daemon=True).start()
         
+        # خادم HLS
+        class HLSHandler(SimpleHTTPRequestHandler):
+            def end_headers(self):
+                self.send_header('Access-Control-Allow-Origin', '*')
+                super().end_headers()
+        HTTPServer(('0.0.0.0', 8000), HLSHandler).serve_forever()
+        EOF
         python3 stream_server.py
