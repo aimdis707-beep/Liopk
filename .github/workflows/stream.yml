@@ -1,4 +1,4 @@
-Name: HLS Restreamer - Auto-Search & Keyboard Control
+name: HLS Restreamer - Auto-Search & Keyboard Control
 
 on:
   workflow_dispatch:
