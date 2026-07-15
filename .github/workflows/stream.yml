@@ -1,4 +1,4 @@
-Name: HLS Restreamer - Ultimate Fast TV Control
+name: HLS Restreamer - Ultimate Fast TV Control
 
 on:
   workflow_dispatch:
