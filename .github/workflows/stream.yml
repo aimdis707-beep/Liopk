@@ -1,12 +1,12 @@
-name: HLS Restreamer - Chrome Browser Fix
+name: HLS Restreamer - YouTube Edition
 
 on:
   workflow_dispatch:
   schedule:
-    # 🎯 توقيت المغرب: يشتغل السيرفر كل 5 ساعات (7:30 صباحاً، 12:30 ظهراً، 5:30 مساءً، 10:30 ليلاً)
+    # 🎯 يشتغل السيرفر كل 5 ساعات
     - cron: '30 6,11,16,21 * * *'
 
-# 🔐 حل مشكلة التوقف: السيرفر الجديد ينهي السيرفر القديم فوراً ليستلم مكانه بدون أي تداخل في الروابط
+# 🔐 إنهاء السيرفر القديم فوراً لمنع التداخل
 concurrency:
   group: hls-stream-group
   cancel-in-progress: true
@@ -74,12 +74,13 @@ jobs:
         FB_ACCESS_TOKEN = "EAANvxZBsQD30BR0Nn0kAQYFGmHcZBOZBedfuZBHWjRbpsf21WcCIjYaZARho35ACoeT7ciL2NjJIpgLMZAZCsZBgW4kHZBpRXTkcSLUXoOMFgGZAkjoZARLYZB6iZCZCvz4393TVd7REaKZBbkM9M3jH7kAujyOws5hLynwy9Oo340AJEoFzBqzUKdsqz6hdRn8pwoBx3CBaW3U"
         CONTROL_API_URL = f"https://graph.facebook.com/v18.0/{FB_POST_ID}?fields=message&access_token={FB_ACCESS_TOKEN}"
 
-        INPUT_URL = "http://simpletv.uk:80/play/live.php?mac=00:1A:79:7C:4C:BD&stream=2085199&extension=ts&play_token=mtwmOd2vTX"
+        # 📺 تم تغيير الرابط إلى يوتيوب
+        INPUT_URL = "https://www.youtube.com"
         HLS_DIR = os.path.abspath("hls_stream")
 
         active_driver = None
 
-        # 📡 خيط الاستماع الخلفي للتحكم بالماوس (تم تحديثه لحل مشكلة عدم الحركة نهائياً)
+        # 📡 خيط الاستماع للتحكم والتنقل بين الفيديوهات
         def remote_control_listener():
             global active_driver
             last_command_id = ""
@@ -97,36 +98,34 @@ jobs:
                                 if action and cmd_id != last_command_id:
                                     last_command_id = cmd_id
                                     driver = active_driver
-                                    if driver:
-                                        # إنشاء كائن التحكم
+                                    
+                                    if driver and "data:" not in driver.current_url:
                                         actions = ActionChains(driver)
                                         
-                                        # حل جذري: وضع الماوس أولاً في منتصف الصفحة (على عنصر body) لتنشيط موقعه
+                                        # تفعيل التمرير (Scroll) والتحرك
                                         try:
-                                            body_element = driver.find_element("tag name", "body")
-                                            actions.move_to_element(body_element).perform()
-                                        except:
-                                            pass
-
-                                        # تنفيذ الحركة الفعلية
-                                        try:
-                                            if action == "up":
-                                                actions.move_by_offset(0, -100).perform()
-                                                print("🖱️ تم تحريك الماوس للأعلى")
-                                            elif action == "down":
-                                                actions.move_by_offset(0, 100).perform()
-                                                print("🖱️ تم تحريك الماوس للأسفل")
+                                            if action == "down":
+                                                # التمرير لأسفل للتنقل بين الفيديوهات
+                                                driver.execute_script("window.scrollBy(0, 300);")
+                                                print("🖱️ تم التمرير لأسفل (Scroll Down)")
+                                            elif action == "up":
+                                                # التمرير لأعلى
+                                                driver.execute_script("window.scrollBy(0, -300);")
+                                                print("🖱️ تم التمرير لأعلى (Scroll Up)")
                                             elif action == "left":
+                                                # حركة الماوس العادية لليسار
                                                 actions.move_by_offset(-100, 0).perform()
                                                 print("🖱️ تم تحريك الماوس لليسار")
                                             elif action == "right":
+                                                # حركة الماوس العادية لليمين
                                                 actions.move_by_offset(100, 0).perform()
                                                 print("🖱️ تم تحريك الماوس لليمين")
                                             elif action == "click":
+                                                # الضغط لتشغيل الفيديو
                                                 actions.click().perform()
-                                                print("🖱️ تم النقر بالماوس")
+                                                print("🖱️ تم النقر لتشغيل الفيديو")
                                         except Exception as mouse_err:
-                                            print(f"⚠️ خطأ أثناء الحركة: {mouse_err}")
+                                            print(f"⚠️ خطأ حركة: {mouse_err}")
                             except Exception as parse_err:
                                 pass
                     except Exception as fetch_err:
@@ -148,12 +147,18 @@ jobs:
                     try:
                         chrome_options = Options()
                         chrome_options.add_argument("--no-sandbox")
+                        chrome_options.add_argument("--disable-dev-shm-usage")
                         chrome_options.add_argument("--start-fullscreen")
+                        # تفعيل الصوت التلقائي دون الحاجة لتفاعل المستخدم ليشتغل صوت يوتيوب فوراً
                         chrome_options.add_argument("--autoplay-policy=no-user-gesture-required")
-                        chrome_options.add_argument(f"user-agent=Mozilla/5.0")
+                        chrome_options.add_argument(f"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                        
                         active_driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=chrome_options)
                         active_driver.set_window_size(1280, 720)
+                        
+                        print(f"🌐 جاري فتح موقع يوتيوب...")
                         active_driver.get(INPUT_URL)
+                        time.sleep(6) # انتظار تحميل واجهة يوتيوب الأساسية
                         
                         record_cmd = ["ffmpeg", "-f", "x11grab", "-video_size", "1280x720", "-framerate", "20", "-i", ":99.0", "-f", "pulse", "-ac", "2", "-i", "VirtualSink.monitor", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "96k", "-f", "hls", "-hls_time", "2", "-hls_list_size", "4", os.path.join(HLS_DIR, "stream.m3u8")]
                         proc = subprocess.Popen(record_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -163,7 +168,9 @@ jobs:
                             except: break
                         proc.terminate()
                         active_driver.quit()
-                    except: time.sleep(5)
+                    except Exception as err:
+                        print(f"⚠️ خطأ في تشغيل المتصفح: {err}")
+                        time.sleep(5)
             threading.Thread(target=stream_loop, daemon=True).start()
 
         def run_custom_server():
@@ -176,7 +183,7 @@ jobs:
 
         def update_github_playlist(url):
             try:
-                content = f'#EXTM3U\n#EXTINF:-1 tvg-name="Neo IPTV" group-title="Live",Neo IPTV\n{url}/stream.m3u8\n'
+                content = f'#EXTM3U\n#EXTINF:-1 tvg-name="YouTube Live" group-title="Live",YouTube\n{url}/stream.m3u8\n'
                 with open("playlist.m3u", "w") as f: f.write(content)
                 subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
                 subprocess.run(["git", "config", "--global", "user.email", "actions@github.com"])
@@ -206,9 +213,8 @@ jobs:
             threading.Thread(target=remote_control_listener, daemon=True).start()
             start_screen_recording_pipeline()
             threading.Thread(target=run_custom_server, daemon=True).start()
-            time.sleep(3) # تأكيد عمل السيرفر قبل بدء النفق
+            time.sleep(3)
             start_tunnel()
-            # السيرفر يبقى يعمل لمدة 5 ساعات بشكل مستمر حتى تبدأ الجولة التالية
             time.sleep(18000)
         EOF
         
