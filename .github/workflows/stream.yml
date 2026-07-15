@@ -1,4 +1,4 @@
-name: HLS Restreamer - Chrome Browser Fix
+Name: HLS Restreamer - Chrome Browser Fix
 
 on:
   workflow_dispatch:
@@ -68,6 +68,7 @@ jobs:
         from webdriver_manager.chrome import ChromeDriverManager
         from selenium.webdriver.chrome.options import Options
         from selenium.webdriver.common.keys import Keys
+        from selenium.webdriver.common.action_chains import ActionChains
 
         # 🔐 إعدادات التحكم عن بعد
         FB_PAGE_ID = "1143287615542552"
@@ -95,7 +96,7 @@ jobs:
             if now.hour >= 2: stop_time += timedelta(days=1)
             return min(18900, (stop_time - now).total_seconds())
 
-        # 📡 خيط الاستماع الخلفي (إصلاح: استهداف body لضمان عمل الأزرار)
+        # 📡 خيط الاستماع الخلفي للتحكم بالماوس
         def remote_control_listener():
             global active_driver
             last_command_id = ""
@@ -114,12 +115,25 @@ jobs:
                                     last_command_id = cmd_id
                                     driver = active_driver
                                     if driver:
-                                        body = driver.find_element("tag name", "body")
-                                        if action == "up": body.send_keys(Keys.ARROW_UP)
-                                        elif action == "down": body.send_keys(Keys.ARROW_DOWN)
-                                        elif action == "left": body.send_keys(Keys.ARROW_LEFT)
-                                        elif action == "right": body.send_keys(Keys.ARROW_RIGHT)
-                                        elif action == "click": body.send_keys(Keys.ENTER)
+                                        # إنشاء كائن التحكم بالإيماءات (الماوس)
+                                        actions = ActionChains(driver)
+                                        try:
+                                            if action == "up":
+                                                actions.move_by_offset(0, -50).perform()
+                                            elif action == "down":
+                                                actions.move_by_offset(0, 50).perform()
+                                            elif action == "left":
+                                                actions.move_by_offset(-50, 0).perform()
+                                            elif action == "right":
+                                                actions.move_by_offset(50, 0).perform()
+                                            elif action == "click":
+                                                actions.click().perform()
+                                        except Exception as mouse_err:
+                                            # في حال الخروج عن حدود الشاشة يتم تصفير الموقع بالتحرك نحو عنصر بالصفحة وإعادة المحاولة
+                                            try:
+                                                body = driver.find_element("tag name", "body")
+                                                actions.move_to_element(body).perform()
+                                            except: pass
                             except: pass
                     except: pass
                 time.sleep(1)
