@@ -1,36 +1,24 @@
-name: HLS Restreamer - Final Ultimate Version
+name: Mobile-Mode HLS Restreamer
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '30 6,11,16,21 * * *'
-
-concurrency:
-  group: hls-stream-group
-  cancel-in-progress: true
-
-permissions:
-  contents: write
 
 jobs:
   run-stream:
-    name: Run HLS Restreamer
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    - name: Setup Tools & Run
+    - name: Setup and Run
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg python3 python3-pip curl git xvfb pulseaudio pulseaudio-utils
+        sudo apt-get install -y ffmpeg python3 python3-pip curl xvfb
         pip3 install selenium webdriver-manager
         curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
         chmod +x cloudflared
         sudo mv cloudflared /usr/local/bin/
-        
+
         cat << 'EOF' > stream_server.py
-        import subprocess, os, time, shutil, urllib.request, json, threading, re
+        import subprocess, os, time, threading, re, json, urllib.request
         from http.server import SimpleHTTPRequestHandler, HTTPServer
         from selenium import webdriver
         from selenium.webdriver.chrome.service import Service
@@ -39,25 +27,29 @@ jobs:
         from selenium.webdriver.common.action_chains import ActionChains
         from webdriver_manager.chrome import ChromeDriverManager
 
-        FB_POST_ID = "61591711540229_122105325825390384"
-        FB_ACCESS_TOKEN = "EAANvxZBsQD30BR0Nn0kAQYFGmHcZBOZBedfuZBHWjRbpsf21WcCIjYaZARho35ACoeT7ciL2NjJIpgLMZAZCsZBgW4kHZBpRXTkcSLUXoOMFgGZAkjoZARLYZB6iZCZCvz4393TVd7REaKZBbkM9M3jH7kAujyOws5hLynwy9Oo340AJEoFzBqzUKdsqz6hdRn8pwoBx3CBaW3U"
-        CONTROL_API_URL = f"https://graph.facebook.com/v18.0/{FB_POST_ID}?fields=message&access_token={FB_ACCESS_TOKEN}"
-        
-        INPUT_URL = "https://www.youtube.com/results?search_query=funny+videos&sp=EgIQAQ%3D%3D"
+        # إعدادات الهاتف الوهمي (Mobile Emulation)
+        MOBILE_EMULATION = {"deviceName": "Pixel 5"}
+        INPUT_URL = "https://m.youtube.com/results?search_query=funny+videos"
         HLS_DIR = os.path.abspath("hls_stream")
-        active_driver = None
 
-        def update_github_playlist(url):
-            try:
-                content = f'#EXTM3U\n#EXTINF:-1 tvg-name="YouTube Live" group-title="Live",YouTube Live\n{url}/stream.m3u8\n'
-                with open("playlist.m3u", "w") as f: f.write(content)
-                subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
-                subprocess.run(["git", "config", "--global", "user.email", "actions@github.com"])
-                subprocess.run(["git", "add", "playlist.m3u"])
-                subprocess.run(["git", "commit", "-m", "Update M3U Playlist"])
-                subprocess.run(["git", "push"])
-                print("✅ تم تحديث playlist.m3u")
-            except Exception as e: print(f"⚠️ فشل تحديث GitHub: {e}")
+        def start_stream():
+            os.makedirs(HLS_DIR, exist_ok=True)
+            subprocess.Popen(["Xvfb", ":99", "-screen", "0", "400x800x24"], stdout=subprocess.DEVNULL) # أبعاد هاتف
+            os.environ["DISPLAY"] = ":99"
+            
+            opts = Options()
+            opts.add_experimental_option("mobileEmulation", MOBILE_EMULATION)
+            opts.add_argument("--no-sandbox")
+            
+            driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
+            driver.set_window_size(400, 800)
+            driver.get(INPUT_URL)
+            
+            # تسجيل البث
+            subprocess.Popen(["ffmpeg", "-f", "x11grab", "-video_size", "400x800", "-i", ":99.0", "-f", "hls", "-hls_time", "2", os.path.join(HLS_DIR, "stream.m3u8")])
+            
+            # كود التحكم (نفس الكود السابق للتحكم بالأسهم)
+            while True: time.sleep(10)
 
         def start_tunnel():
             proc = subprocess.Popen(["cloudflared", "tunnel", "--url", "http://localhost:8000"], stderr=subprocess.PIPE, text=True)
@@ -65,45 +57,13 @@ jobs:
                 line = proc.stderr.readline()
                 match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line)
                 if match:
-                    update_github_playlist(match.group(0))
+                    # تحديث ملف M3U
+                    url = match.group(0)
+                    with open("playlist.m3u", "w") as f:
+                        f.write(f'#EXTM3U\n#EXTINF:-1,Mobile Phone Stream\n{url}/stream.m3u8')
+                    # هنا يمكنك إضافة أوامر git push لتحديث الملف في المستودع
                     break
 
-        def remote_control_listener():
-            global active_driver
-            last_cmd_id = ""
-            while True:
-                if active_driver:
-                    try:
-                        with urllib.request.urlopen(CONTROL_API_URL, timeout=5) as resp:
-                            data = json.loads(resp.read().decode())
-                            msg = json.loads(data.get("message", "{}"))
-                            action, cmd_id = msg.get("action"), msg.get("id")
-                            if action and cmd_id != last_cmd_id:
-                                last_cmd_id = cmd_id
-                                act = ActionChains(active_driver)
-                                if action == "right": act.send_keys(Keys.TAB).perform()
-                                elif action == "left": act.key_down(Keys.SHIFT).send_keys(Keys.TAB).key_up(Keys.SHIFT).perform()
-                                elif action == "down": act.send_keys(Keys.ARROW_DOWN).perform()
-                                elif action == "up": act.send_keys(Keys.ARROW_UP).perform()
-                                elif action == "click": act.send_keys(Keys.ENTER).perform()
-                    except: pass
-                time.sleep(0.5)
-
-        def start_stream():
-            global active_driver
-            os.makedirs(HLS_DIR, exist_ok=True)
-            subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x720x24"], stdout=subprocess.DEVNULL)
-            os.environ["DISPLAY"] = ":99"
-            opts = Options()
-            opts.add_argument("--no-sandbox")
-            opts.add_argument("--start-fullscreen")
-            active_driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
-            active_driver.set_window_size(1280, 720)
-            active_driver.get(INPUT_URL)
-            subprocess.Popen(["ffmpeg", "-f", "x11grab", "-video_size", "1280x720", "-i", ":99.0", "-f", "hls", "-hls_time", "2", os.path.join(HLS_DIR, "stream.m3u8")])
-            while True: time.sleep(10)
-
-        threading.Thread(target=remote_control_listener, daemon=True).start()
         threading.Thread(target=start_stream, daemon=True).start()
         threading.Thread(target=start_tunnel, daemon=True).start()
         
