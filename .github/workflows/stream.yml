@@ -1,4 +1,4 @@
-name: HLS Restreamer - YouTube Classic TV Control
+name: HLS Restreamer - YouTube TV Fast Control
 
 on:
   workflow_dispatch:
@@ -68,13 +68,13 @@ jobs:
         FB_ACCESS_TOKEN = "EAANvxZBsQD30BR0Nn0kAQYFGmHcZBOZBedfuZBHWjRbpsf21WcCIjYaZARho35ACoeT7ciL2NjJIpgLMZAZCsZBgW4kHZBpRXTkcSLUXoOMFgGZAkjoZARLYZB6iZCZCvz4393TVd7REaKZBbkM9M3jH7kAujyOws5hLynwy9Oo340AJEoFzBqzUKdsqz6hdRn8pwoBx3CBaW3U"
         CONTROL_API_URL = f"https://graph.facebook.com/v18.0/{FB_POST_ID}?fields=message&access_token={FB_ACCESS_TOKEN}"
 
-        # 📺 العودة إلى يوتيوب العادي الآمن والمستقر
-        INPUT_URL = "https://www.youtube.com"
+        # 📺 العودة لنسخة التلفزيون السريعة جداً
+        INPUT_URL = "https://www.youtube.com/tv"
         HLS_DIR = os.path.abspath("hls_stream")
 
         active_driver = None
 
-        # 📡 خيط الاستماع للتحكم الذكي بدون ماوس
+        # 📡 خيط الاستماع للتحكم فائق السرعة عبر الأسهم
         def remote_control_listener():
             global active_driver
             last_command_id = ""
@@ -96,29 +96,29 @@ jobs:
                                     if driver:
                                         actions = ActionChains(driver)
                                         try:
-                                            # محاكاة ذكية للتنقل عبر يوتيوب العادي باستخدام الكيبورد والـ TAB
-                                            if action == "right":
-                                                actions.send_keys(Keys.TAB).perform()
-                                                print("📺 تنقل: العنصر التالي (TAB)")
-                                            elif action == "left":
-                                                actions.send_keys(Keys.SHIFT + Keys.TAB).perform()
-                                                print("📺 تنقل: العنصر السابق (SHIFT+TAB)")
+                                            # إرسال أزرار الريموت المباشرة والسريعة جداً ⚡
+                                            if action == "up":
+                                                actions.send_keys(Keys.ARROW_UP).perform()
+                                                print("📺 ريموت سريع: أعلى")
                                             elif action == "down":
-                                                actions.send_keys(Keys.PAGE_DOWN).perform()
-                                                print("📺 تنقل: تمرير لأسفل (Page Down)")
-                                            elif action == "up":
-                                                actions.send_keys(Keys.PAGE_UP).perform()
-                                                print("📺 تنقل: تمرير لأعلى (Page Up)")
+                                                actions.send_keys(Keys.ARROW_DOWN).perform()
+                                                print("📺 ريموت سريع: أسفل")
+                                            elif action == "left":
+                                                actions.send_keys(Keys.ARROW_LEFT).perform()
+                                                print("📺 ريموت سريع: يسار")
+                                            elif action == "right":
+                                                actions.send_keys(Keys.ARROW_RIGHT).perform()
+                                                print("📺 ريموت سريع: يمين")
                                             elif action == "click":
                                                 actions.send_keys(Keys.ENTER).perform()
-                                                print("📺 تنقل: تشغيل الفيديو (ENTER)")
+                                                print("📺 ريموت سريع: موافق (ENTER)")
                                         except Exception as key_err:
                                             print(f"⚠️ خطأ ريموت: {key_err}")
                             except Exception as parse_err:
                                 pass
                     except Exception as fetch_err:
                         pass
-                time.sleep(0.5)
+                time.sleep(0.3) # تسريع معدل فحص الأوامر لاستجابة فورية ⚡
 
         def start_screen_recording_pipeline():
             global active_driver
@@ -140,7 +140,8 @@ jobs:
                         chrome_options.add_argument("--disable-gpu")
                         chrome_options.add_argument("--hide-scrollbars")
                         
-                        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                        # 🔒 استخدام هويت متصفح شاشات Cobalt الأصلية والحديثة (لتجنب حظر Something went wrong بالكامل)
+                        user_agent = "Mozilla/5.0 (DTV; YouTubeKey; Cobalt/23.LTS.3.310156-gold; Android TV; SmartTV) Cobalt/23.LTS.3.310156-gold (unlike Gecko) Starboard/15, LG/webOS/04.06.75 (LG; SmartTV; 2023; TV)"
                         chrome_options.add_argument(f"user-agent={user_agent}")
                         
                         chrome_options.add_argument("--autoplay-policy=no-user-gesture-required")
@@ -150,14 +151,14 @@ jobs:
                         active_driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=chrome_options)
                         active_driver.set_window_size(1280, 720)
                         
-                        print("🌐 جاري تشغيل يوتيوب العادي...")
+                        print("🌐 جاري تشغيل يوتيوب بوضع التلفاز السريع المحمي...")
                         active_driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
                             "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
                         })
                         active_driver.get(INPUT_URL)
-                        time.sleep(10)
+                        time.sleep(10) # انتظار تحميل الواجهة
                         
-                        # إخفاء مؤشر الماوس تماماً من المتصفح
+                        # إخفاء الماوس تماماً لتبقى الشاشة نظيفة للتلفزيون
                         try:
                             active_driver.execute_script("var style = document.createElement('style'); style.innerHTML = '* { cursor: none !important; }'; document.head.appendChild(style);")
                         except:
@@ -191,7 +192,6 @@ jobs:
                 subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
                 subprocess.run(["git", "config", "--global", "user.email", "actions@github.com"])
                 subprocess.run(["git", "add", "playlist.m3u"])
-                # تصحيح الخطأ البرمجي هنا لتفادي التوقف الإجباري ✅
                 subprocess.run(["git", "commit", "-m", "update playlist"])
                 subprocess.run(["git", "push"])
             except Exception as e:
