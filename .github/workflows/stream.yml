@@ -1,4 +1,4 @@
-name: HLS Restreamer - YouTube Edition Fixed
+Name: HLS Restreamer - YouTube Edition Fixed
 
 on:
   workflow_dispatch:
@@ -28,9 +28,9 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y ffmpeg python3 python3-pip curl git xvfb pulseaudio pulseaudio-utils
         
-        # تثبيت متصفح جوجل كروم الرسمي
+        # تثبيت متصفح جوجل كروم الرسمي (تم تصحيح المسار هنا ✅)
         wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-        echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /sources.list.d/google-chrome.list
+        echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
         sudo apt-get update
         sudo apt-get install -y google-chrome-stable
         
