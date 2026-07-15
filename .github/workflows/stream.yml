@@ -1,4 +1,4 @@
-Name: HLS Restreamer - YouTube TV Edition
+name: HLS Restreamer - YouTube TV Edition
 
 on:
   workflow_dispatch:
