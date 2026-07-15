@@ -1,4 +1,4 @@
-Name: HLS Restreamer - Ultimate Robust Control
+name: HLS Restreamer - Ultimate Robust Control
 
 on:
   workflow_dispatch:
