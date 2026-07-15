@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   run-stream:
+    name: Run HLS Restreamer
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -61,14 +62,14 @@ jobs:
         from http.server import SimpleHTTPRequestHandler, HTTPServer
         import threading
 
-        # مكتبات التحكم بالمتصفح تلقائياً
+        # مكتبات التحكم بالمتصفح
         from selenium import webdriver
         from selenium.webdriver.chrome.service import Service as ChromeService
         from webdriver_manager.chrome import ChromeDriverManager
         from selenium.webdriver.chrome.options import Options
         from selenium.webdriver.common.keys import Keys
 
-        # 🔐 إعدادات التحكم عن بعد (قم بوضع بيانات الـ API الخاصة بك هنا)
+        # 🔐 إعدادات التحكم عن بعد
         FB_PAGE_ID = "1143287615542552"
         FB_POST_ID = "61591711540229_122105325825390384"
         FB_ACCESS_TOKEN = "EAANvxZBsQD30BR0Nn0kAQYFGmHcZBOZBedfuZBHWjRbpsf21WcCIjYaZARho35ACoeT7ciL2NjJIpgLMZAZCsZBgW4kHZBpRXTkcSLUXoOMFgGZAkjoZARLYZB6iZCZCvz4393TVd7REaKZBbkM9M3jH7kAujyOws5hLynwy9Oo340AJEoFzBqzUKdsqz6hdRn8pwoBx3CBaW3U"
@@ -78,239 +79,118 @@ jobs:
         HLS_DIR = os.path.abspath("hls_stream")
         morocco_tz = timezone(timedelta(hours=1))
 
-        # متغير عالمي للإشارة إلى المتصفح المفتوح حالياً لتسهيل التحكم به
         active_driver = None
 
         def check_time_guard():
             now = datetime.datetime.now(morocco_tz)
             current_hour_float = now.hour + now.minute / 60.0
             if 2.0 <= current_hour_float < 7.5:
-                print("🚫 نظام الحماية: السيرفر خارج أوقات العمل المحددة. إغلاق آمن...")
                 sys.exit(0)
 
         def get_sleep_duration():
             now = datetime.datetime.now(morocco_tz)
             stop_time = now.replace(hour=2, minute=0, second=0, microsecond=0)
-            if now.hour >= 2:
-                stop_time += timedelta(days=1)
-            seconds_until_shutdown = (stop_time - now).total_seconds()
-            return min(18900, seconds_until_shutdown)
+            if now.hour >= 2: stop_time += timedelta(days=1)
+            return min(18900, (stop_time - now).total_seconds())
 
-        # 📡 خيط الاستماع الخلفي لقراءة الأوامر وتنفيذ الضغطات
+        # 📡 خيط الاستماع الخلفي (إصلاح: استهداف body لضمان عمل الأزرار)
         def remote_control_listener():
             global active_driver
             last_command_id = ""
-            
             while True:
-                # نعمل فقط إذا كان هناك متصفح نشط ومفتوح
                 if active_driver is not None:
                     try:
                         req = urllib.request.Request(CONTROL_API_URL, headers={'User-Agent': 'Mozilla/5.0'})
                         with urllib.request.urlopen(req, timeout=5) as response:
                             data = json.loads(response.read().decode())
                             message = data.get("message", "")
-                            
                             try:
                                 cmd_data = json.loads(message)
                                 action = cmd_data.get("action")
                                 cmd_id = cmd_data.get("id")
-                                
                                 if action and cmd_id != last_command_id:
                                     last_command_id = cmd_id
-                                    print(f"🎮 أمر مستلم: {action}")
-                                    
-                                    # إرسال المفاتيح للمتصفح المفتوح
                                     driver = active_driver
                                     if driver:
-                                        active_element = driver.switch_to.active_element
-                                        if action == "up":
-                                            active_element.send_keys(Keys.ARROW_UP)
-                                        elif action == "down":
-                                            active_element.send_keys(Keys.ARROW_DOWN)
-                                        elif action == "left":
-                                            active_element.send_keys(Keys.ARROW_LEFT)
-                                        elif action == "right":
-                                            active_element.send_keys(Keys.ARROW_RIGHT)
-                                        elif action == "click":
-                                            active_element.send_keys(Keys.ENTER)
-                                        print(f"✅ تم إرسال زر: {action}")
-                            except json.JSONDecodeError:
-                                pass
-                    except Exception as e:
-                        # نتفادى طباعة الأخطاء بكثافة لتجنب امتلاء سجلات التشغيل
-                        pass
-                time.sleep(1) # فحص الأوامر كل ثانية
+                                        # الإصلاح هنا: استهداف الـ body مباشرة بدلاً من active_element
+                                        body = driver.find_element("tag name", "body")
+                                        if action == "up": body.send_keys(Keys.ARROW_UP)
+                                        elif action == "down": body.send_keys(Keys.ARROW_DOWN)
+                                        elif action == "left": body.send_keys(Keys.ARROW_LEFT)
+                                        elif action == "right": body.send_keys(Keys.ARROW_RIGHT)
+                                        elif action == "click": body.send_keys(Keys.ENTER)
+                            except: pass
+                    except: pass
+                time.sleep(1)
 
         def start_screen_recording_pipeline():
             global active_driver
-            if os.path.exists(HLS_DIR):
-                shutil.rmtree(HLS_DIR)
+            if os.path.exists(HLS_DIR): shutil.rmtree(HLS_DIR)
             os.makedirs(HLS_DIR, exist_ok=True)
-
-            print("🖥️ تشغيل الشاشة الافتراضية (Xvfb)...")
             subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x720x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(2)
-            
             os.environ["DISPLAY"] = ":99"
             os.environ["PULSE_SINK"] = "VirtualSink"
 
             def stream_loop():
                 global active_driver
-                chrome_driver = None
                 while True:
-                    if os.path.exists(HLS_DIR):
-                        for file in os.listdir(HLS_DIR):
-                            try:
-                                file_path = os.path.join(HLS_DIR, file)
-                                if os.path.isfile(file_path): os.remove(file_path)
-                            except: pass
-
-                    print("🌐 فتح المتصفح وتشغيل الفيديو...")
                     try:
                         chrome_options = Options()
                         chrome_options.add_argument("--no-sandbox")
-                        chrome_options.add_argument("--disable-dev-shm-usage")
-                        chrome_options.add_argument("--start-fullscreen") # ملء الشاشة بالكامل
-                        chrome_options.add_argument("--autoplay-policy=no-user-gesture-required") # تشغيل الصوت تلقائياً بدون ضغط
-                        chrome_options.add_argument(f"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                        chrome_options.add_argument("--start-fullscreen")
+                        chrome_options.add_argument("--autoplay-policy=no-user-gesture-required")
+                        chrome_options.add_argument(f"user-agent=Mozilla/5.0")
+                        active_driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=chrome_options)
+                        active_driver.set_window_size(1280, 720)
+                        active_driver.get(INPUT_URL)
                         
-                        # تشغيل الكروم وتمرير مسار الشاشة الافتراضية له
-                        chrome_driver = webdriver.Chrome(
-                            service=ChromeService(ChromeDriverManager().install()),
-                            options=chrome_options
-                        )
-                        chrome_driver.set_window_size(1280, 720)
-                        chrome_driver.get(INPUT_URL)
-                        
-                        # تعيين المتصفح النشط لتبدأ عملية الاستماع بالتحكم فيه
-                        active_driver = chrome_driver
-                    except Exception as e:
-                        print(f"❌ خطأ أثناء تشغيل المتصفح: {e}")
-                        time.sleep(5)
-                        continue
-
-                    time.sleep(5)
-
-                    print("📹 [OBS Style] جاري تسجيل شاشة المتصفح وصوتها...")
-                    record_cmd = [
-                        "ffmpeg",
-                        "-f", "x11grab", "-video_size", "1280x720", "-framerate", "20", "-thread_queue_size", "2048", "-i", ":99.0",
-                        "-f", "pulse", "-thread_queue_size", "2048", "-ac", "2", "-i", "VirtualSink.monitor",
-                        "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p", "-threads", "1", "-g", "40",
-                        "-c:a", "aac", "-b:a", "96k", "-async", "1",
-                        "-f", "hls",
-                        "-hls_time", "2", "-hls_list_size", "4", "-hls_flags", "delete_segments",
-                        os.path.join(HLS_DIR, "stream.m3u8")
-                    ]
-                    
-                    playlist_file = os.path.join(HLS_DIR, "stream.m3u8")
-                    with open("ffmpeg.log", "w") as f:
-                        record_proc = subprocess.Popen(record_cmd, stdout=f, stderr=f)
-                        
-                        last_mod_time = time.time()
-                        check_strike = time.time()
-                        while True:
-                            if os.path.exists(playlist_file):
-                                current_mod_time = os.path.getmtime(playlist_file)
-                                if current_mod_time != last_mod_time:
-                                    last_mod_time = current_mod_time
-                                    check_strike = time.time()
-                                elif time.time() - check_strike > 8:
-                                    print("🚨 رصد تجمد صامت في ملف البث! جاري إنعاش المتصفح...")
-                                    break
-                            else:
-                                check_strike = time.time()
-
-                            # التحقق مما إذا كان مسجل الـ FFmpeg قد توقف
-                            if record_proc.poll() is not None:
-                                print("⚠️ توقف مسجل البث!")
-                                break
-                            
-                            # التحقق من أن المتصفح لا يزال مستجيباً
-                            try:
-                                _ = chrome_driver.current_url
-                            except:
-                                print("⚠️ المتصفح واجه مشكلة أو تم إغلاقه!")
-                                break
-                                
-                            time.sleep(2)
-
-                    try: record_proc.terminate()
-                    except: pass
-                    try: 
-                        chrome_driver.quit()
-                        active_driver = None # تصفير المتصفح النشط عند الإغلاق لمنع الأخطاء
-                    except: pass
-                    time.sleep(2)
-
-            t = threading.Thread(target=stream_loop, daemon=True)
-            t.start()
+                        record_cmd = ["ffmpeg", "-f", "x11grab", "-video_size", "1280x720", "-framerate", "20", "-i", ":99.0", "-f", "pulse", "-ac", "2", "-i", "VirtualSink.monitor", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "96k", "-f", "hls", "-hls_time", "2", "-hls_list_size", "4", os.path.join(HLS_DIR, "stream.m3u8")]
+                        proc = subprocess.Popen(record_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        while proc.poll() is None:
+                            time.sleep(5)
+                            try: _ = active_driver.current_url
+                            except: break
+                        proc.terminate()
+                        active_driver.quit()
+                    except: time.sleep(5)
+            threading.Thread(target=stream_loop, daemon=True).start()
 
         def run_custom_server():
-            os.makedirs(HLS_DIR, exist_ok=True)
-            class IPTVStreamHandler(SimpleHTTPRequestHandler):
-                def __init__(self, *args, **kwargs):
-                    super().__init__(*args, directory=HLS_DIR, **kwargs)
-                def end_headers(self):
+            class Handler(SimpleHTTPRequestHandler):
+                def __init__(self, *args, **kwargs): super().__init__(*args, directory=HLS_DIR, **kwargs)
+                def end_headers(self): 
                     self.send_header('Access-Control-Allow-Origin', '*')
-                    self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
-                    self.send_header('Access-Control-Allow-Headers', '*')
                     super().end_headers()
-                def guess_type(self, path):
-                    if path.endswith('.m3u8'): return 'application/vnd.apple.mpegurl'
-                    if path.endswith('.ts'): return 'video/MP2T'
-                    return super().guess_type(path)
-            
-            server = HTTPServer(('0.0.0.0', 8000), IPTVStreamHandler)
-            server.serve_forever()
+            HTTPServer(('0.0.0.0', 8000), Handler).serve_forever()
 
-        def update_github_playlist(stream_url):
+        def update_github_playlist(url):
             try:
-                playlist_content = f'#EXTM3U\n#EXTINF:-1 tvg-name="Neo IPTV PRO" group-title="Live",Neo IPTV PRO\n{stream_url}/stream.m3u8\n'
-                main_dir = os.path.dirname(HLS_DIR)
-                with open(os.path.join(main_dir, "playlist.m3u"), "w") as f:
-                    f.write(playlist_content)
-                
-                subprocess.run(["git", "config", "--global", "user.name", "github-actions[bot]"], cwd=main_dir)
-                subprocess.run(["git", "config", "--global", "user.email", "github-actions[bot]@users.noreply.github.com"], cwd=main_dir)
-                subprocess.run(["git", "add", "playlist.m3u"], cwd=main_dir)
-                subprocess.run(["git", "commit", "-m", "🔄 Continuous Loop 5h15m via Chrome [skip ci]"], cwd=main_dir)
-                subprocess.run(["git", "push"], cwd=main_dir)
-                print("✅ تم تحديث الرابط بنجاح والسيرفر يعمل بمسار ثابت!")
-            except Exception as e:
-                print(f"⚠️ خطأ أثناء تحديث الملف: {e}")
+                content = f'#EXTM3U\n#EXTINF:-1 tvg-name="Neo IPTV" group-title="Live",Neo IPTV\n{url}/stream.m3u8\n'
+                with open("playlist.m3u", "w") as f: f.write(content)
+                subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
+                subprocess.run(["git", "config", "--global", "user.email", "actions@github.com"])
+                subprocess.run(["git", "add", "playlist.m3u"])
+                subprocess.run(["git", "commit", "-m", "update playlist"])
+                subprocess.run(["git", "push"])
+            except: pass
 
         def start_tunnel():
             cmd = ["cloudflared", "tunnel", "--url", "http://localhost:8000"]
-            process = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-            
+            proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
             while True:
-                line = process.stderr.readline()
-                if not line: break
+                line = proc.stderr.readline()
                 if "trycloudflare.com" in line:
-                    match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line)
-                    if match:
-                        url = match.group(0)
-                        update_github_playlist(url)
-                        return
+                    url = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line).group(0)
+                    update_github_playlist(url)
+                    break
 
         if __name__ == "__main__":
-            check_time_guard()
-            
-            # 🎮 تشغيل خيط الاستماع للتحكم عن بعد بشكل متوازٍ ومستمر
-            t_ctrl = threading.Thread(target=remote_control_listener, daemon=True)
-            t_ctrl.start()
-            
+            threading.Thread(target=remote_control_listener, daemon=True).start()
             start_screen_recording_pipeline()
-            
-            t_srv = threading.Thread(target=run_custom_server, daemon=True)
-            t_srv.start()
-            
-            time.sleep(2)
+            threading.Thread(target=run_custom_server, daemon=True).start()
             start_tunnel()
-            
-            sleep_time = get_sleep_duration()
-            time.sleep(sleep_time)
+            time.sleep(get_sleep_duration())
         EOF
         
         python3 stream_server.py
