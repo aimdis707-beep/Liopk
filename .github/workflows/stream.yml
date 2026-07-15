@@ -84,7 +84,9 @@ jobs:
         def check_time_guard():
             now = datetime.datetime.now(morocco_tz)
             current_hour_float = now.hour + now.minute / 60.0
+            # حماية لمنع التشغيل غير الضروري في أوقات محددة
             if 2.0 <= current_hour_float < 7.5:
+                print("⏳ خارج أوقات التشغيل المحددة. إغلاق آمن...")
                 sys.exit(0)
 
         def get_sleep_duration():
@@ -112,7 +114,6 @@ jobs:
                                     last_command_id = cmd_id
                                     driver = active_driver
                                     if driver:
-                                        # الإصلاح هنا: استهداف الـ body مباشرة بدلاً من active_element
                                         body = driver.find_element("tag name", "body")
                                         if action == "up": body.send_keys(Keys.ARROW_UP)
                                         elif action == "down": body.send_keys(Keys.ARROW_DOWN)
@@ -173,22 +174,32 @@ jobs:
                 subprocess.run(["git", "add", "playlist.m3u"])
                 subprocess.run(["git", "commit", "-m", "update playlist"])
                 subprocess.run(["git", "push"])
-            except: pass
+            except Exception as e:
+                print(f"⚠️ فشل تحديث Git: {e}")
 
         def start_tunnel():
+            print("🚀 بدء نفق Cloudflare...")
             cmd = ["cloudflared", "tunnel", "--url", "http://localhost:8000"]
             proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
             while True:
                 line = proc.stderr.readline()
-                if "trycloudflare.com" in line:
-                    url = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line).group(0)
+                if not line:
+                    time.sleep(1)
+                    continue
+                # فحص آمن للتأكد من وجود رابط متاح في السطر قبل استخراجه لمنع انهيار السكربت
+                match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line)
+                if match:
+                    url = match.group(0)
+                    print(f"🔗 تم إنشاء الرابط بنجاح: {url}")
                     update_github_playlist(url)
                     break
 
         if __name__ == "__main__":
+            check_time_guard()
             threading.Thread(target=remote_control_listener, daemon=True).start()
             start_screen_recording_pipeline()
             threading.Thread(target=run_custom_server, daemon=True).start()
+            time.sleep(3) # تأكيد عمل السيرفر قبل بدء النفق
             start_tunnel()
             time.sleep(get_sleep_duration())
         EOF
