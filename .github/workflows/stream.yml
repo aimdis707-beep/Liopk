@@ -1,4 +1,4 @@
-name: HLS Restreamer - YouTube Classic TV Control
+Name: HLS Restreamer - YouTube Classic TV Control
 
 on:
   workflow_dispatch:
@@ -98,23 +98,18 @@ jobs:
                                         try:
                                             # محاكاة ذكية للتنقل عبر يوتيوب العادي باستخدام الكيبورد والـ TAB
                                             if action == "right":
-                                                # الانتقال للعنصر التالي (مثل سهم يمين)
                                                 actions.send_keys(Keys.TAB).perform()
                                                 print("📺 تنقل: العنصر التالي (TAB)")
                                             elif action == "left":
-                                                # الانتقال للعنصر السابق
                                                 actions.send_keys(Keys.SHIFT + Keys.TAB).perform()
                                                 print("📺 تنقل: العنصر السابق (SHIFT+TAB)")
                                             elif action == "down":
-                                                # النزول لصفحة الفيديوهات لأسفل
                                                 actions.send_keys(Keys.PAGE_DOWN).perform()
                                                 print("📺 تنقل: تمرير لأسفل (Page Down)")
                                             elif action == "up":
-                                                # الصعود لأعلى
                                                 actions.send_keys(Keys.PAGE_UP).perform()
                                                 print("📺 تنقل: تمرير لأعلى (Page Up)")
                                             elif action == "click":
-                                                # تشغيل أو اختيار الفيديو المحدد حالياً
                                                 actions.send_keys(Keys.ENTER).perform()
                                                 print("📺 تنقل: تشغيل الفيديو (ENTER)")
                                         except Exception as key_err:
@@ -145,7 +140,6 @@ jobs:
                         chrome_options.add_argument("--disable-gpu")
                         chrome_options.add_argument("--hide-scrollbars")
                         
-                        # استخدام User-Agent كمبيوتر عادي ومستقر لتفادي أي حظر أو أخطاء تشغيل
                         user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                         chrome_options.add_argument(f"user-agent={user_agent}")
                         
@@ -156,14 +150,14 @@ jobs:
                         active_driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=chrome_options)
                         active_driver.set_window_size(1280, 720)
                         
-                        print("🌐 جاري تشغيل يوتيوب العادي (نسخة الكمبيوتر المستقرة)...")
+                        print("🌐 جاري تشغيل يوتيوب العادي...")
                         active_driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
                             "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
                         })
                         active_driver.get(INPUT_URL)
-                        time.sleep(10) # انتظار تحميل الصفحة الرئيسية
+                        time.sleep(10)
                         
-                        # 👁️ حيلة ذكية لإخفاء مؤشر الماوس تماماً من المتصفح لكي لا يظهر بالبث
+                        # إخفاء مؤشر الماوس تماماً من المتصفح
                         try:
                             active_driver.execute_script("var style = document.createElement('style'); style.innerHTML = '* { cursor: none !important; }'; document.head.appendChild(style);")
                         except:
@@ -197,7 +191,8 @@ jobs:
                 subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
                 subprocess.run(["git", "config", "--global", "user.email", "actions@github.com"])
                 subprocess.run(["git", "add", "playlist.m3u"])
-                subprocess.run(["git-commit", "-m", "update playlist"])
+                # تصحيح الخطأ البرمجي هنا لتفادي التوقف الإجباري ✅
+                subprocess.run(["git", "commit", "-m", "update playlist"])
                 subprocess.run(["git", "push"])
             except Exception as e:
                 print(f"⚠️ فشل تحديث Git: {e}")
