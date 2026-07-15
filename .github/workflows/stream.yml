@@ -1,4 +1,4 @@
-name: HLS Restreamer - YouTube TV Edition
+Name: HLS Restreamer - YouTube Classic TV Control
 
 on:
   workflow_dispatch:
@@ -68,13 +68,13 @@ jobs:
         FB_ACCESS_TOKEN = "EAANvxZBsQD30BR0Nn0kAQYFGmHcZBOZBedfuZBHWjRbpsf21WcCIjYaZARho35ACoeT7ciL2NjJIpgLMZAZCsZBgW4kHZBpRXTkcSLUXoOMFgGZAkjoZARLYZB6iZCZCvz4393TVd7REaKZBbkM9M3jH7kAujyOws5hLynwy9Oo340AJEoFzBqzUKdsqz6hdRn8pwoBx3CBaW3U"
         CONTROL_API_URL = f"https://graph.facebook.com/v18.0/{FB_POST_ID}?fields=message&access_token={FB_ACCESS_TOKEN}"
 
-        # 📺 رابط يوتيوب المخصص للتلفزيون (Leanback UI) مع إخفاء الماوس تلقائياً
-        INPUT_URL = "https://www.youtube.com/tv"
+        # 📺 العودة إلى يوتيوب العادي الآمن والمستقر
+        INPUT_URL = "https://www.youtube.com"
         HLS_DIR = os.path.abspath("hls_stream")
 
         active_driver = None
 
-        # 📡 خيط الاستماع للتحكم بطريقة الريموت كنترول (أزرار الكيبورد الفعالة)
+        # 📡 خيط الاستماع للتحكم الذكي بدون ماوس
         def remote_control_listener():
             global active_driver
             last_command_id = ""
@@ -94,32 +94,36 @@ jobs:
                                     driver = active_driver
                                     
                                     if driver:
-                                        # محاكاة الضغط على أزرار ريموت التلفاز الحقيقي
                                         actions = ActionChains(driver)
                                         try:
-                                            if action == "up":
-                                                actions.send_keys(Keys.ARROW_UP).perform()
-                                                print("📺 ريموت: اضغط للأعلى")
-                                            elif action == "down":
-                                                actions.send_keys(Keys.ARROW_DOWN).perform()
-                                                print("📺 ريموت: اضغط للأسفل")
+                                            # محاكاة ذكية للتنقل عبر يوتيوب العادي باستخدام الكيبورد والـ TAB
+                                            if action == "right":
+                                                # الانتقال للعنصر التالي (مثل سهم يمين)
+                                                actions.send_keys(Keys.TAB).perform()
+                                                print("📺 تنقل: العنصر التالي (TAB)")
                                             elif action == "left":
-                                                actions.send_keys(Keys.ARROW_LEFT).perform()
-                                                print("📺 ريموت: اضغط لليسار")
-                                            elif action == "right":
-                                                actions.send_keys(Keys.ARROW_RIGHT).perform()
-                                                print("📺 ريموت: اضغط لليمين")
+                                                # الانتقال للعنصر السابق
+                                                actions.send_keys(Keys.SHIFT + Keys.TAB).perform()
+                                                print("📺 تنقل: العنصر السابق (SHIFT+TAB)")
+                                            elif action == "down":
+                                                # النزول لصفحة الفيديوهات لأسفل
+                                                actions.send_keys(Keys.PAGE_DOWN).perform()
+                                                print("📺 تنقل: تمرير لأسفل (Page Down)")
+                                            elif action == "up":
+                                                # الصعود لأعلى
+                                                actions.send_keys(Keys.PAGE_UP).perform()
+                                                print("📺 تنقل: تمرير لأعلى (Page Up)")
                                             elif action == "click":
-                                                # زر Enter لتشغيل الفيديو أو اختياره
+                                                # تشغيل أو اختيار الفيديو المحدد حالياً
                                                 actions.send_keys(Keys.ENTER).perform()
-                                                print("📺 ريموت: اضغط موافق (OK/Enter)")
+                                                print("📺 تنقل: تشغيل الفيديو (ENTER)")
                                         except Exception as key_err:
                                             print(f"⚠️ خطأ ريموت: {key_err}")
                             except Exception as parse_err:
                                 pass
                     except Exception as fetch_err:
                         pass
-                time.sleep(0.5) # تقليل مدة الانتظار لاستجابة أسرع للريموت
+                time.sleep(0.5)
 
         def start_screen_recording_pipeline():
             global active_driver
@@ -139,12 +143,10 @@ jobs:
                         chrome_options.add_argument("--disable-dev-shm-usage")
                         chrome_options.add_argument("--start-fullscreen")
                         chrome_options.add_argument("--disable-gpu")
-                        
-                        # 👁️ حيلة إخفاء مؤشر الماوس تماماً من الشاشة عن طريق كود مخصص في نظام العرض
                         chrome_options.add_argument("--hide-scrollbars")
                         
-                        # إيهام يوتيوب بأن المتصفح هو شاشة تلفزيون ذكية (مهم جداً لتفعيل واجهة التلفاز)
-                        user_agent = "Mozilla/5.0 (SmartHub; SMART-TV; U; WebOS; GyroD; LG NetCast.TV-2013) AppleWebKit/537.41 (KHTML, like Gecko) Edge/12.0"
+                        # استخدام User-Agent كمبيوتر عادي ومستقر لتفادي أي حظر أو أخطاء تشغيل
+                        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                         chrome_options.add_argument(f"user-agent={user_agent}")
                         
                         chrome_options.add_argument("--autoplay-policy=no-user-gesture-required")
@@ -154,14 +156,14 @@ jobs:
                         active_driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=chrome_options)
                         active_driver.set_window_size(1280, 720)
                         
-                        print("🌐 جاري تشغيل يوتيوب بوضع التلفاز المطور...")
+                        print("🌐 جاري تشغيل يوتيوب العادي (نسخة الكمبيوتر المستقرة)...")
                         active_driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
                             "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
                         })
                         active_driver.get(INPUT_URL)
-                        time.sleep(10) # انتظار تحميل واجهة التلفزيون بالكامل
+                        time.sleep(10) # انتظار تحميل الصفحة الرئيسية
                         
-                        # إخفاء الماوس برمجياً عبر حقن كود CSS يمنع ظهور الماوس
+                        # 👁️ حيلة ذكية لإخفاء مؤشر الماوس تماماً من المتصفح لكي لا يظهر بالبث
                         try:
                             active_driver.execute_script("var style = document.createElement('style'); style.innerHTML = '* { cursor: none !important; }'; document.head.appendChild(style);")
                         except:
@@ -195,7 +197,7 @@ jobs:
                 subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
                 subprocess.run(["git", "config", "--global", "user.email", "actions@github.com"])
                 subprocess.run(["git", "add", "playlist.m3u"])
-                subprocess.run(["git", "commit", "-m", "update playlist"])
+                subprocess.run(["git-commit", "-m", "update playlist"])
                 subprocess.run(["git", "push"])
             except Exception as e:
                 print(f"⚠️ فشل تحديث Git: {e}")
