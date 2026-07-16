@@ -70,8 +70,8 @@ jobs:
         ffmpeg_process = None
         cf_process = None
 
-        # تشغيل الشاشة الوهمية بأبعاد البث القديمة
-        subprocess.Popen(["Xvfb", ":99", "-screen", "0", "400x800x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # تحديث أبعاد الشاشة الوهمية إلى أبعاد الفيديو الكاملة HD (1280x720) بدلاً من أبعاد الهاتف
+        subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x720x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(2)
         os.environ["DISPLAY"] = ":99"
         os.environ["PULSE_SINK"] = "VirtualSink"
@@ -213,7 +213,6 @@ jobs:
             source_url = data.get("source")
             watermark_text = data.get("watermark", "")
             
-            # إغلاق أي بث وإغلاق نفق Cloudflare القديم تماماً لتوليد آخر جديد فريد
             if vlc_process:
                 try: vlc_process.terminate()
                 except: pass
@@ -232,7 +231,6 @@ jobs:
                 global stream_status, vlc_process, ffmpeg_process, cf_process, output_m3u8_url
                 stream_status = "Generating New Cloudflare Tunnel..."
                 
-                # فتح نفق سحابي جديد ومنفصل خاص بهذا البث فقط
                 cmd = ["cloudflared", "tunnel", "--url", "http://localhost:5000"]
                 cf_process = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
                 
@@ -249,17 +247,19 @@ jobs:
 
                 stream_status = "Opening Media Player (VLC)..."
                 try:
-                    vlc_cmd = ["cvlc", "--fullscreen", "--no-video-title-show", "--no-qt-fs-controller", source_url]
+                    # إضافة خيارات تمديد الفيديو وإخفاء النوافذ لتناسب الأبعاد الجديدة الكاملة
+                    vlc_cmd = ["cvlc", "--fullscreen", "--no-video-title-show", "--no-qt-fs-controller", "--video-wallpaper", source_url]
                     vlc_process = subprocess.Popen(vlc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     time.sleep(5)
 
                     stream_status = "Streaming Player Screen Live"
                     video_filters = []
                     if watermark_text:
-                        video_filters = ["-vf", f"drawtext=text='{watermark_text}':x=10:y=h-th-10:fontsize=20:fontcolor=white:box=1:boxcolor=black@0.5"]
+                        video_filters = ["-vf", f"drawtext=text='{watermark_text}':x=10:y=h-th-10:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.5"]
 
+                    # تعديل x11grab ليلتقط الشاشة الكاملة العريضة بدقة 1280x720
                     record_cmd = [
-                        "ffmpeg", "-f", "x11grab", "-video_size", "400x800", "-framerate", "25", "-i", ":99.0",
+                        "ffmpeg", "-f", "x11grab", "-video_size", "1280x720", "-framerate", "25", "-i", ":99.0",
                         "-f", "pulse", "-ac", "2", "-i", "VirtualSink.monitor",
                         "-c:v", "libx264", "-preset", "ultrafast", "-g", "50"
                     ] + video_filters + [
