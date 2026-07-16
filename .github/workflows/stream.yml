@@ -74,7 +74,34 @@ jobs:
 
         active_driver = None
 
-        # 📡 الاستماع للتحكم السريع
+        # 🐭 دالة لحقن وتحديث مؤشر الفأرة المرئي على الشاشة داخل المتصفح
+        def update_visual_cursor(driver, x, y):
+            try:
+                js_cursor_code = f"""
+                var cursor = document.getElementById('virtual-mouse-cursor');
+                if (!cursor) {{
+                    cursor = document.createElement('div');
+                    cursor.id = 'virtual-mouse-cursor';
+                    cursor.style.position = 'fixed';
+                    cursor.style.width = '20px';
+                    cursor.style.height = '20px';
+                    cursor.style.backgroundColor = 'rgba(255, 0, 0, 0.7)';
+                    cursor.style.border = '2px solid white';
+                    cursor.style.borderRadius = '50%';
+                    cursor.style.zIndex = '9999999';
+                    cursor.style.pointerEvents = 'none';
+                    cursor.style.boxShadow = '0 0 8px rgba(0,0,0,0.5)';
+                    cursor.style.transition = 'all 0.1s ease-out';
+                    document.body.appendChild(cursor);
+                }}
+                cursor.style.left = '{x}px';
+                cursor.style.top = '{y}px';
+                """
+                driver.execute_script(js_cursor_code)
+            except Exception as e:
+                print(f"⚠️ فشل تحديث مؤشر الفأرة المرئي: {e}")
+
+        # 📡 الاستماع للتحكم عن بعد وتحويل الأوامر إلى حركات الماوس الذكية
         def remote_control_listener():
             global active_driver
             last_command_id = ""
@@ -89,38 +116,80 @@ jobs:
                                 cmd_data = json.loads(message)
                                 action = cmd_data.get("action")
                                 cmd_id = cmd_data.get("id")
+                                
                                 if action and cmd_id != last_command_id:
                                     last_command_id = cmd_id
                                     driver = active_driver
                                     
                                     if driver:
                                         actions = ActionChains(driver)
-                                        if action == "right":
+                                        # استخراج الإحداثيات إن وجدت بالطلب الافتراضي (المركز إذا لم ترسل)
+                                        x = cmd_data.get("x", 200)
+                                        y = cmd_data.get("y", 400)
+                                        
+                                        # 1. تحريك المؤشر المرئي أولاً على الصفحة
+                                        update_visual_cursor(driver, x, y)
+                                        
+                                        if action == "move":
+                                            # فقط تحريك الفأرة
+                                            actions.move_by_offset(x, y).perform()
+                                            # إعادة تصفير الأوفست لتفادي التراكم
+                                            actions.reset_actions()
+                                            print(f"🖱️ ماوس: تحريك إلى ({x}, {y})")
+                                            
+                                        elif action == "click":
+                                            # نقرة يسار في إحداثيات معينة
+                                            # نقوم بالتحريك إلى الزاوية العليا اليسرى للمتصفح 0,0 أولاً ثم التحرك بدقة للإحداثي المطلوب
+                                            driver.execute_script(f"window.scrollTo(0, 0);")
+                                            actions.move_to_element_with_offset(driver.find_element_by_tag_name('body'), x, y).click().perform()
+                                            actions.reset_actions()
+                                            print(f"🖱️ ماوس: نقرة زر أيسر عند ({x}, {y})")
+                                            
+                                        elif action == "double_click":
+                                            # نقرة مزدوجة بالزر الأيسر
+                                            actions.move_to_element_with_offset(driver.find_element_by_tag_name('body'), x, y).double_click().perform()
+                                            actions.reset_actions()
+                                            print(f"🖱️ ماوس: نقرة مزدوجة عند ({x}, {y})")
+                                            
+                                        elif action == "right_click":
+                                            # نقرة بالزر الأيمن (Context Click)
+                                            actions.move_to_element_with_offset(driver.find_element_by_tag_name('body'), x, y).context_click().perform()
+                                            actions.reset_actions()
+                                            print(f"🖱️ ماوس: نقرة زر أيمن عند ({x}, {y})")
+                                            
+                                        elif action == "drag_and_drop":
+                                            # سحب وإفلات من إحداثي لبداية إلى إحداثي نهاية
+                                            to_x = cmd_data.get("to_x", x)
+                                            to_y = cmd_data.get("to_y", y + 150) # افتراضيًا تسحب للأسفل قليلاً
+                                            
+                                            # تحديث شكل الماوس المرئي لبداية ونهاية العملية
+                                            update_visual_cursor(driver, to_x, to_y)
+                                            
+                                            body = driver.find_element_by_tag_name('body')
+                                            actions.move_to_element_with_offset(body, x, y).click_and_hold().move_to_element_with_offset(body, to_x, to_y).release().perform()
+                                            actions.reset_actions()
+                                            print(f"🖱️ ماوس: سحب وإفلات من ({x}, {y}) إلى ({to_x}, {to_y})")
+                                            
+                                        elif action == "scroll":
+                                            # التمرير (Mouse Wheel) للأعلى أو للأسفل
+                                            # القيمة الموجبة تعني تمرير للأعلى، السالبة تعني تمرير للأسفل
+                                            scroll_amount = cmd_data.get("amount", -300) # القيمة الافتراضية للنزول للأسفل
+                                            driver.execute_script(f"window.scrollBy(0, {-scroll_amount});")
+                                            print(f"🖱️ ماوس: تمرير عجلة بمقدار {scroll_amount}")
+                                            
+                                        # الحفاظ على دعم التوافق مع الأوامر القديمة إذا أُرسلت لتجنب أي كسر بالنظام
+                                        elif action == "right":
                                             actions.send_keys(Keys.TAB).perform()
-                                            print("⌨️ كيبورد: TAB (التالي)")
+                                            print("⌨️ كيبورد (قديم): TAB")
                                         elif action == "left":
                                             actions.key_down(Keys.SHIFT).send_keys(Keys.TAB).key_up(Keys.SHIFT).perform()
-                                            print("⌨️ كيبورد: SHIFT+TAB (السابق)")
+                                            print("⌨️ كيبورد (قديم): SHIFT+TAB")
                                         elif action == "down":
                                             actions.send_keys(Keys.ARROW_DOWN).perform()
-                                            print("⌨️ كيبورد: سهم لأسفل")
+                                            print("⌨️ كيبورد (قديم): سهم لأسفل")
                                         elif action == "up":
                                             actions.send_keys(Keys.ARROW_UP).perform()
-                                            print("⌨️ كيبورد: سهم لأعلى")
-                                        elif action == "click":
-                                            # 🎯 نقرة ذكية على الفيديو النشط حالياً أو تشغيل فيديو آخر
-                                            js_click_video = """
-                                            var videoCard = document.querySelector('ytm-media-item, ytm-video-with-context-renderer, a.media-item-thumbnail-container, a[href*="/watch"]');
-                                            if (videoCard) {
-                                                videoCard.click();
-                                                console.log("🎯 Clicked Video successfully!");
-                                            } else {
-                                                var fallback = document.querySelector('a[href*="/watch"]');
-                                                if (fallback) fallback.click();
-                                            }
-                                            """
-                                            driver.execute_script(js_click_video)
-                                            print("🚀 تم إرسال نقرة ذكية لتشغيل الفيديو!")
+                                            print("⌨️ كيبورد (قديم): سهم لأعلى")
                                             
                             except Exception as parse_err:
                                 pass
@@ -151,7 +220,7 @@ jobs:
                         
                         # 📲 محاكاة متصفح الهاتف
                         mobile_emulation = {
-                            "deviceMetrics": { "width": 400, "height": 800, "pixelRatio": 3.0, "touch": True },
+                            "deviceMetrics": { "width": 400, "height": 800, "pixelRatio": 3.0, "touch": False }, # تم تعطيل touch الافتراضي للسماح بلقطات وتفاعل الماوس الكامل
                             "userAgent": "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, integrate Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
                         }
                         chrome_options.add_experimental_option("mobileEmulation", mobile_emulation)
@@ -179,7 +248,10 @@ jobs:
 
                         time.sleep(2)
 
-                        # ستايل إبراز العناصر النشطة
+                        # تهيئة مؤشر الماوس المرئي في مركز الشاشة فوراً عند التشغيل
+                        update_visual_cursor(active_driver, 200, 400)
+
+                        # ستايل إبراز العناصر النشطة وتخصيص المؤشر
                         try:
                             active_driver.execute_script("""
                                 var style = document.createElement('style');
