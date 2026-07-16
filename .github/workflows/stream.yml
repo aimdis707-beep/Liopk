@@ -26,7 +26,7 @@ jobs:
         
         pip3 install flask requests
         
-        # إنشاء مجلد المفاتيح الآمن وتثبيت ngrok الرسمي بالطريقة الصحيحة لمنع خطأ الـ No such file
+        # إنشاء مجلد المفاتيح الآمن وتثبيت ngrok الرسمي
         sudo mkdir -p /etc/apt/keyrings
         curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/keyrings/ngrok.asc >/dev/null
         echo "deb [signed-by=/etc/apt/keyrings/ngrok.asc] https://ngrok-agent.s3.amazonaws.com/ buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
@@ -56,8 +56,7 @@ jobs:
         import shutil
         import json
         import threading
-        from http.server import SimpleHTTPRequestHandler, HTTPServer
-        from flask import Flask, render_template_string, request, jsonify
+        from flask import Flask, render_template_string, request, jsonify, send_from_directory
 
         app = Flask(__name__)
 
@@ -69,14 +68,22 @@ jobs:
         output_m3u8_url = "Not Generated Yet"
         vlc_process = None
         ffmpeg_process = None
+        cf_process = None
 
-        # تشغيل الشاشة الوهمية بأبعاد البث القديمة الخاصة بك
+        # تشغيل الشاشة الوهمية بأبعاد البث القديمة
         subprocess.Popen(["Xvfb", ":99", "-screen", "0", "400x800x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(2)
         os.environ["DISPLAY"] = ":99"
         os.environ["PULSE_SINK"] = "VirtualSink"
 
-        # تصميم لوحة التحكم الاحترافية لـ Go streamer المتوافقة مع الموبايل والمشغلات
+        # تمرير ملفات البث بشكل فوري ومباشر لحل مشكلة عدم عمل الرابط
+        @app.route('/hls/<path:filename>')
+        def serve_hls(filename):
+            response = send_from_directory(HLS_DIR, filename)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            return response
+
         HTML_PANEL = """
         <!DOCTYPE html>
         <html lang="ar" dir="rtl">
@@ -93,7 +100,9 @@ jobs:
                 label { display: block; margin-bottom: 8px; font-weight: bold; color: #94a3b8; }
                 input[type="text"] { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #475569; background-color: #0f172a; color: #fff; box-sizing: border-box; font-size: 1rem; }
                 input[type="text"]:focus { border-color: #38bdf8; outline: none; }
-                .btn { width: 100%; background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%); color: white; border: none; padding: 14px; font-size: 1.2rem; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3); }
+                .btn-group { display: flex; gap: 15px; margin-top: 10px; }
+                .btn { flex: 2; background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%); color: white; border: none; padding: 14px; font-size: 1.2rem; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3); }
+                .btn-stop { flex: 1; background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3); }
                 .status-card { margin-top: 30px; background: #0f172a; padding: 20px; border-radius: 10px; border-left: 4px solid #38bdf8; }
                 .url-box { background: #1e293b; padding: 10px; border-radius: 6px; word-break: break-all; font-family: monospace; color: #fbbf24; margin-top: 5px; border: 1px solid #475569; }
             </style>
@@ -109,31 +118,55 @@ jobs:
                     <label>إضافة نص ثابت داخل البث (Watermark Text):</label>
                     <input type="text" id="watermark" placeholder="اكتب النص هنا ليظهر أسفل يسار البث...">
                 </div>
-                <button class="btn" onclick="startRestream()">Go Restream 🔥</button>
+                <div class="btn-group">
+                    <button class="btn" onclick="startRestream()">Go Restream 🔥</button>
+                    <button class="btn btn-stop" onclick="stopRestream()">Stop Stream 🛑</button>
+                </div>
                 <div class="status-card">
                     <div>الحالة الحالية: <span id="status" style="font-weight:bold; color:#34d399;">مستعد</span></div>
                     <br>
-                    <div>رابط البث السحابي الجديد (M3U8):</div>
+                    <div>رابط البث السحابي الجديد الفريد (M3U8):</div>
                     <div id="output_url" class="url-box">في انتظار بدء البث...</div>
                 </div>
             </div>
             <script>
+                let statusInterval = null;
                 function startRestream() {
                     const source = document.getElementById('source_url').value;
                     const text = document.getElementById('watermark').value;
                     if(!source) { alert('الرجاء إدخال رابط البث أولاً!'); return; }
-                    document.getElementById('status').innerText = 'جاري تشغيل الرابط عبر VLC وتوليد البث...';
+                    document.getElementById('status').innerText = 'جاري تشغيل الرابط عبر VLC وتوليد نفق بث جديد...';
+                    
                     fetch('/api/start', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({source: source, watermark: text})
-                    }).then(res => res.json()).then(data => { if(data.success) checkStatus(); });
+                    }).then(res => res.json()).then(data => { 
+                        if(data.success) {
+                            if(!statusInterval) checkStatus();
+                        } 
+                    });
+                }
+                function stopRestream() {
+                    document.getElementById('status').innerText = 'جاري إيقاف البث الحالي بالكامل...';
+                    fetch('/api/stop', { method: 'POST' })
+                    .then(res => res.json())
+                    .then(data => {
+                        if(data.success) {
+                            document.getElementById('status').innerText = 'تم إيقاف البث';
+                            document.getElementById('output_url').innerText = 'تم إنهاء الرابط بنجاح.';
+                        }
+                    });
                 }
                 function checkStatus() {
-                    setInterval(() => {
+                    statusInterval = setInterval(() => {
                         fetch('/api/status').then(res => res.json()).then(data => {
                             document.getElementById('status').innerText = data.status;
-                            if(data.output !== "Not Generated Yet") document.getElementById('output_url').innerText = data.output + "/stream.m3u8";
+                            if(data.output !== "Not Generated Yet") {
+                                document.getElementById('output_url').innerText = data.output;
+                            } else if (data.status === "Stopped") {
+                                document.getElementById('output_url').innerText = 'في انتظار بدء البث...';
+                            }
                         });
                     }, 2000);
                 }
@@ -150,25 +183,72 @@ jobs:
             global stream_status, output_m3u8_url
             return jsonify({"status": stream_status, "output": output_m3u8_url})
 
+        @app.route('/api/stop', methods=['POST'])
+        def stop_restream_api():
+            global stream_status, vlc_process, ffmpeg_process, cf_process, output_m3u8_url
+            stream_status = "Stopped"
+            output_m3u8_url = "Not Generated Yet"
+            
+            if vlc_process:
+                try: vlc_process.terminate()
+                except: pass
+                vlc_process = None
+            if ffmpeg_process:
+                try: ffmpeg_process.terminate()
+                except: pass
+                ffmpeg_process = None
+            if cf_process:
+                try: cf_process.terminate()
+                except: pass
+                cf_process = None
+                
+            if os.path.exists(HLS_DIR): shutil.rmtree(HLS_DIR)
+            os.makedirs(HLS_DIR, exist_ok=True)
+            return jsonify({"success": True})
+
         @app.route('/api/start', methods=['POST'])
         def start_restream_api():
-            global stream_status, vlc_process, ffmpeg_process
+            global stream_status, vlc_process, ffmpeg_process, cf_process, output_m3u8_url
             data = request.json
             source_url = data.get("source")
             watermark_text = data.get("watermark", "")
             
+            # إغلاق أي بث وإغلاق نفق Cloudflare القديم تماماً لتوليد آخر جديد فريد
             if vlc_process:
                 try: vlc_process.terminate()
                 except: pass
             if ffmpeg_process:
                 try: ffmpeg_process.terminate()
                 except: pass
+            if cf_process:
+                try: cf_process.terminate()
+                except: pass
+
+            output_m3u8_url = "Not Generated Yet"
+            if os.path.exists(HLS_DIR): shutil.rmtree(HLS_DIR)
+            os.makedirs(HLS_DIR, exist_ok=True)
 
             def media_stream_pipeline():
-                global stream_status, vlc_process, ffmpeg_process
+                global stream_status, vlc_process, ffmpeg_process, cf_process, output_m3u8_url
+                stream_status = "Generating New Cloudflare Tunnel..."
+                
+                # فتح نفق سحابي جديد ومنفصل خاص بهذا البث فقط
+                cmd = ["cloudflared", "tunnel", "--url", "http://localhost:5000"]
+                cf_process = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+                
+                while True:
+                    line = cf_process.stderr.readline()
+                    if not line:
+                        time.sleep(1)
+                        continue
+                    match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line)
+                    if match:
+                        new_tunnel_url = match.group(0)
+                        output_m3u8_url = f"{new_tunnel_url}/hls/stream.m3u8"
+                        break
+
                 stream_status = "Opening Media Player (VLC)..."
                 try:
-                    # فتح الرابط بملء الشاشة عبر خيارات VLC المخصصة للأنظمة الوهمية cvlc
                     vlc_cmd = ["cvlc", "--fullscreen", "--no-video-title-show", "--no-qt-fs-controller", source_url]
                     vlc_process = subprocess.Popen(vlc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     time.sleep(5)
@@ -178,7 +258,6 @@ jobs:
                     if watermark_text:
                         video_filters = ["-vf", f"drawtext=text='{watermark_text}':x=10:y=h-th-10:fontsize=20:fontcolor=white:box=1:boxcolor=black@0.5"]
 
-                    # التقاط الشاشة المخصصة (400x800) مع دمج الصوت والصورة بنفس طريقتك السابقة تماماً
                     record_cmd = [
                         "ffmpeg", "-f", "x11grab", "-video_size", "400x800", "-framerate", "25", "-i", ":99.0",
                         "-f", "pulse", "-ac", "2", "-i", "VirtualSink.monitor",
@@ -195,29 +274,6 @@ jobs:
             threading.Thread(target=media_stream_pipeline, daemon=True).start()
             return jsonify({"success": True})
 
-        def run_custom_server():
-            class Handler(SimpleHTTPRequestHandler):
-                def end_headers(self):
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    super().end_headers()
-            try: HTTPServer(('0.0.0.0', 8000), Handler).serve_forever()
-            except: pass
-
-        def start_cloudflare_tunnel():
-            global output_m3u8_url
-            cmd = ["cloudflared", "tunnel", "--url", "http://localhost:8000"]
-            proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-            while True:
-                line = proc.stderr.readline()
-                if not line:
-                    time.sleep(1)
-                    continue
-                match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line)
-                if match:
-                    output_m3u8_url = match.group(0)
-                    print(f"🔗 M3U8 Link: {output_m3u8_url}/stream.m3u8", flush=True)
-                    break
-
         def start_ngrok_panel():
             subprocess.Popen(["ngrok", "http", "5000"], stdout=subprocess.DEVNULL)
             time.sleep(4)
@@ -228,24 +284,19 @@ jobs:
             except: pass
 
         if __name__ == "__main__":
-            threading.Thread(target=run_custom_server, daemon=True).start()
-            threading.Thread(target=start_cloudflare_tunnel, daemon=True).start()
             threading.Thread(target=start_ngrok_panel, daemon=True).start()
             app.run(host='0.0.0.0', port=5000)
         EOF
 
     - name: Run Go Streamer in Background & Prevent Canceled Error
       run: |
-        # تشغيل في الخلفية لمنع توقف الـ Workflow
         nohup python3 stream_server.py > server.log 2>&1 &
         
         echo "⏳ جاري تهيئة الأنفاق وتوليد روابط لوحة التحكم وبث الـ M3U8..."
         sleep 12
         
-        # طباعة الروابط في صفحة الـ Logs لنسخها فوراً عند بدء التشغيل
         cat server.log | grep -E "Link:" || true
         
-        # إبقاء الـ Action يعمل بشكل مستمر دون إغلاق تلقائي
         while true; do
           sleep 60
         done
