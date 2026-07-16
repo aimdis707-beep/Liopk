@@ -22,30 +22,27 @@ jobs:
     - name: Setup Tools, VLC Media Player & Virtual Audio
       run: |
         sudo apt-get update
-        # تثبيت VLC وادوات الشاشة الوهمية والصوت
         sudo apt-get install -y ffmpeg python3 python3-pip curl git xvfb pulseaudio pulseaudio-utils xdotool vlc
         
         pip3 install flask requests
         
-        # تثبيت ngrok الرسمي
+        # تثبيت ngrok
         curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.dev/ngrok.asc >/dev/null
         echo "deb [signed-by=/etc/apt/trusted.gpg.dev/ngrok.asc] https://ngrok-agent.s3.amazonaws.com/ buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
         sudo apt-get update && sudo apt-get install ngrok
         
-        # تفعيل توكن Ngrok الخاص بك
         ngrok config add-authtoken 2rGoodQZRdc0r24rGd0j30jVwc3_4w7shjjjz3cN3hz9u9gVo
         
-        # إعداد نظام الصوت الوهمي
+        # نظام الصوت الوهمي
         pulseaudio -D --exit-idle-time=-1 || true
         pactl load-module module-null-sink sink_name=VirtualSink || true
         pactl set-default-sink VirtualSink || true
         
-        # تثبيت Cloudflared للـ M3U8
         curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
         chmod +x cloudflared
         sudo mv cloudflared /usr/local/bin/
 
-    - name: Create and Run Go Streamer Server (VLC Version)
+    - name: Create Go Streamer Script
       run: |
         cat << 'EOF' > stream_server.py
         import subprocess
@@ -65,163 +62,71 @@ jobs:
         if os.path.exists(HLS_DIR): shutil.rmtree(HLS_DIR)
         os.makedirs(HLS_DIR, exist_ok=True)
 
-        # الحالات العامة للمشروع
         stream_status = "Stopped"
         output_m3u8_url = "Not Generated Yet"
         vlc_process = None
         ffmpeg_process = None
 
-        # تشغيل الشاشة الوهمية مسبقاً بأبعاد البث الخاصة بك
         subprocess.Popen(["Xvfb", ":99", "-screen", "0", "400x800x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(2)
         os.environ["DISPLAY"] = ":99"
         os.environ["PULSE_SINK"] = "VirtualSink"
 
-        # واجهة التحكم الاحترافية بتصميم Go streamer العصري
         HTML_PANEL = """
         <!DOCTYPE html>
         <html lang="ar" dir="rtl">
         <head>
             <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Go Streamer - لوحة تشغيل بروابط الميديا</title>
             <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap" rel="stylesheet">
             <style>
-                body {
-                    font-family: 'Tajawal', sans-serif;
-                    background-color: #0f172a;
-                    color: #f8fafc;
-                    margin: 0;
-                    padding: 20px;
-                }
-                .container {
-                    max-width: 800px;
-                    margin: 0 auto;
-                    background: #1e293b;
-                    padding: 30px;
-                    border-radius: 16px;
-                    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
-                    border: 1px solid #334155;
-                }
-                h1 {
-                    text-align: center;
-                    color: #38bdf8;
-                    margin-bottom: 30px;
-                    font-size: 2.5rem;
-                    text-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
-                }
-                .form-group {
-                    margin-bottom: 20px;
-                }
-                label {
-                    display: block;
-                    margin-bottom: 8px;
-                    font-weight: bold;
-                    color: #94a3b8;
-                }
-                input[type="text"] {
-                    width: 100%;
-                    padding: 12px;
-                    border-radius: 8px;
-                    border: 1px solid #475569;
-                    background-color: #0f172a;
-                    color: #fff;
-                    box-sizing: border-box;
-                    font-size: 1rem;
-                    transition: border 0.3s;
-                }
-                input[type="text"]:focus {
-                    border-color: #38bdf8;
-                    outline: none;
-                }
-                .btn {
-                    width: 100%;
-                    background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
-                    color: white;
-                    border: none;
-                    padding: 14px;
-                    font-size: 1.2rem;
-                    font-weight: bold;
-                    border-radius: 8px;
-                    cursor: pointer;
-                    transition: opacity 0.2s;
-                    box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);
-                }
-                .btn:hover { opacity: 0.9; }
-                .status-card {
-                    margin-top: 30px;
-                    background: #0f172a;
-                    padding: 20px;
-                    border-radius: 10px;
-                    border-left: 4px solid #38bdf8;
-                }
-                .status-item {
-                    margin-bottom: 10px;
-                    font-size: 1.1rem;
-                }
-                .status-value { font-weight: bold; color: #34d399; }
-                .url-box {
-                    background: #1e293b;
-                    padding: 10px;
-                    border-radius: 6px;
-                    word-break: break-all;
-                    font-family: monospace;
-                    color: #fbbf24;
-                    margin-top: 5px;
-                    border: 1px solid #475569;
-                }
+                body { font-family: 'Tajawal', sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
+                .container { max-width: 800px; margin: 0 auto; background: #1e293b; padding: 30px; border-radius: 16px; border: 1px solid #334155; }
+                h1 { text-align: center; color: #38bdf8; }
+                .form-group { margin-bottom: 20px; }
+                label { display: block; margin-bottom: 8px; color: #94a3b8; }
+                input[type="text"] { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #475569; background-color: #0f172a; color: #fff; box-sizing: border-box; }
+                .btn { width: 100%; background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%); color: white; border: none; padding: 14px; font-size: 1.2rem; font-weight: bold; border-radius: 8px; cursor: pointer; }
+                .status-card { margin-top: 30px; background: #0f172a; padding: 20px; border-radius: 10px; border-left: 4px solid #38bdf8; }
+                .url-box { background: #1e293b; padding: 10px; border-radius: 6px; word-break: break-all; color: #fbbf24; }
             </style>
         </head>
         <body>
             <div class="container">
                 <h1>🚀 Go Streamer (VLC Mode)</h1>
                 <div class="form-group">
-                    <label>رابط البث أو الفيديو المراد تشغيله (M3U8 / MPD / Direct Link):</label>
+                    <label>رابط البث أو الفيديو (M3U8 / MPD / Direct Link):</label>
                     <input type="text" id="source_url" placeholder="ضع رابط البث المباشر هنا...">
                 </div>
                 <div class="form-group">
-                    <label>إضافة نص ثابت داخل البث (Watermark Text):</label>
-                    <input type="text" id="watermark" placeholder="اكتب النص هنا ليظهر أسفل يسار الفيديو...">
+                    <label>نص ثابت (Watermark Text):</label>
+                    <input type="text" id="watermark" placeholder="اكتب النص هنا...">
                 </div>
                 <button class="btn" onclick="startRestream()">Go Restream 🔥</button>
-
                 <div class="status-card">
-                    <div class="status-item">الحالة الحالية: <span id="status" class="status-value">مستعد</span></div>
-                    <div class="status-item">رابط البث السحابي الجديد (M3U8):</div>
+                    <div>الحالة الحالية: <span id="status" style="color:#34d399;">مستعد</span></div>
+                    <br>
+                    <div>رابط البث السحابي (M3U8):</div>
                     <div id="output_url" class="url-box">في انتظار بدء البث...</div>
                 </div>
             </div>
-
             <script>
                 function startRestream() {
                     const source = document.getElementById('source_url').value;
                     const text = document.getElementById('watermark').value;
-                    if(!source) { alert('الرجاء إدخال رابط البث أولاً!'); return; }
-                    
-                    document.getElementById('status').innerText = 'جاري تشغيل الرابط عبر VLC وتوليد البث...';
-                    
+                    if(!source) { alert('الرجاء إدخال رابط البث!'); return; }
+                    document.getElementById('status').innerText = 'جاري تشغيل الرابط عبر VLC...';
                     fetch('/api/start', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({source: source, watermark: text})
-                    })
-                    .then(res => res.json())
-                    .then(data => {
-                        if(data.success) {
-                            checkStatus();
-                        }
-                    });
+                    }).then(res => res.json()).then(data => { if(data.success) checkStatus(); });
                 }
-
                 function checkStatus() {
                     setInterval(() => {
-                        fetch('/api/status')
-                        .then(res => res.json())
-                        .then(data => {
+                        fetch('/api/status').then(res => res.json()).then(data => {
                             document.getElementById('status').innerText = data.status;
-                            if(data.output !== "Not Generated Yet") {
-                                document.getElementById('output_url').innerText = data.output + "/stream.m3u8";
-                            }
+                            if(data.output !== "Not Generated Yet") document.getElementById('output_url').innerText = data.output + "/stream.m3u8";
                         });
                     }, 2000);
                 }
@@ -231,8 +136,7 @@ jobs:
         """
 
         @app.route('/')
-        def index():
-            return render_template_string(HTML_PANEL)
+        def index(): return render_template_string(HTML_PANEL)
 
         @app.route('/api/status')
         def get_status():
@@ -246,7 +150,6 @@ jobs:
             source_url = data.get("source")
             watermark_text = data.get("watermark", "")
             
-            # إغلاق أي مشغل أو بث قديم يعمل حالياً لتفريغ الرام والمعالج
             if vlc_process:
                 try: vlc_process.terminate()
                 except: pass
@@ -257,26 +160,16 @@ jobs:
             def media_stream_pipeline():
                 global stream_status, vlc_process, ffmpeg_process
                 stream_status = "Opening Media Player (VLC)..."
-                
                 try:
-                    # تشغيل VLC داخل الشاشة الوهمية بوضع ملء الشاشة وبدون واجهة تحكم معقدة لضمان نظافة البث
-                    vlc_cmd = [
-                        "cvlc", "--fullscreen", "--no-video-title-show", "--no-qt-fs-controller", 
-                        source_url
-                    ]
+                    vlc_cmd = ["cvlc", "--fullscreen", "--no-video-title-show", "--no-qt-fs-controller", source_url]
                     vlc_process = subprocess.Popen(vlc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    
-                    # وقت قصير ليتأكد النفاذ للرابط والتشغيل الكامل داخل الشاشة الوهمية
-                    time.sleep(4)
+                    time.sleep(5)
 
                     stream_status = "Streaming Player Screen Live"
-                    
-                    # إعداد فلتر النص لعرضه أسفل اليسار في التقاط الـ X11
                     video_filters = []
                     if watermark_text:
                         video_filters = ["-vf", f"drawtext=text='{watermark_text}':x=10:y=h-th-10:fontsize=20:fontcolor=white:box=1:boxcolor=black@0.5"]
 
-                    # التقاط كامل الشاشة الوهمية الحالية وبثها كـ HLS بنفس نظام الكود القديم
                     record_cmd = [
                         "ffmpeg", "-f", "x11grab", "-video_size", "400x800", "-framerate", "25", "-i", ":99.0",
                         "-f", "pulse", "-ac", "2", "-i", "VirtualSink.monitor",
@@ -286,9 +179,7 @@ jobs:
                         "-f", "hls", "-hls_time", "2", "-hls_list_size", "5", "-hls_flags", "delete_segments",
                         os.path.join(HLS_DIR, "stream.m3u8")
                     ]
-                    
                     ffmpeg_process = subprocess.Popen(record_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    
                 except Exception as e:
                     stream_status = f"Error: {str(e)}"
 
@@ -297,8 +188,7 @@ jobs:
 
         def run_custom_server():
             class Handler(SimpleHTTPRequestHandler):
-                def __init__(self, *args, **kwargs): super().__init__(*args, directory=HLS_DIR, **kwargs)
-                def end_headers(self): 
+                def end_headers(self):
                     self.send_header('Access-Control-Allow-Origin', '*')
                     super().end_headers()
             try: HTTPServer(('0.0.0.0', 8000), Handler).serve_forever()
@@ -306,7 +196,6 @@ jobs:
 
         def start_cloudflare_tunnel():
             global output_m3u8_url
-            print("🚀 بدء نفق Cloudflare لتوليد الـ M3U8 الجديد...")
             cmd = ["cloudflared", "tunnel", "--url", "http://localhost:8000"]
             proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
             while True:
@@ -317,22 +206,17 @@ jobs:
                 match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line)
                 if match:
                     output_m3u8_url = match.group(0)
-                    print(f"🔗 رابط البث السحابي الجديد: {output_m3u8_url}/stream.m3u8")
+                    print(f"🔗 M3U8 Link: {output_m3u8_url}/stream.m3u8", flush=True)
                     break
 
         def start_ngrok_panel():
-            print("🌐 جاري تشغيل نفق Ngrok للوحة التحكم...")
             subprocess.Popen(["ngrok", "http", "5000"], stdout=subprocess.DEVNULL)
-            time.sleep(3)
+            time.sleep(4)
             try:
                 import requests
                 res = requests.get("http://127.0.0.1:4040/api/tunnels").json()
-                public_url = res['tunnels'][0]['public_url']
-                print("\n" + "="*60)
-                print(f"🔗 رابط لوحة التحكم Go streamer العام:\n👉 {public_url} 👈")
-                print("="*60 + "\n")
-            except Exception as e:
-                print(f"⚠️ تعذر جلب رابط Ngrok تلقائياً: {e}")
+                print(f"🔗 Panel Link: {res['tunnels'][0]['public_url']}", flush=True)
+            except: pass
 
         if __name__ == "__main__":
             threading.Thread(target=run_custom_server, daemon=True).start()
@@ -340,5 +224,19 @@ jobs:
             threading.Thread(target=start_ngrok_panel, daemon=True).start()
             app.run(host='0.0.0.0', port=5000)
         EOF
+
+    - name: Run Go Streamer in Background & Prevent Canceled Error
+      run: |
+        # تشغيل السيرفر في الخلفية بشكل منفصل تماماً حتى لا يسبب إلغاء للخطوة
+        nohup python3 stream_server.py > server.log 2>&1 &
         
-        python3 stream_server.py
+        echo "⏳ جاري تهيئة الأنفاق وتوليد روابط لوحة التحكم وبث الـ M3U8..."
+        sleep 10
+        
+        # طباعة الروابط مباشرة داخل الكونسول لنسخها
+        cat server.log | grep -E "Link:" || true
+        
+        # حلقة لا نهائية ذكية للحفاظ على بيئة العمل حية ومستقرة بدون توقف
+        while true; do
+          sleep 60
+        done
