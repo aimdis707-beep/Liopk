@@ -26,18 +26,21 @@ jobs:
         
         pip3 install flask requests
         
-        # تثبيت ngrok
-        curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.dev/ngrok.asc >/dev/null
-        echo "deb [signed-by=/etc/apt/trusted.gpg.dev/ngrok.asc] https://ngrok-agent.s3.amazonaws.com/ buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+        # إنشاء مجلد المفاتيح الآمن وتثبيت ngrok الرسمي بالطريقة الصحيحة لمنع خطأ الـ No such file
+        sudo mkdir -p /etc/apt/keyrings
+        curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/keyrings/ngrok.asc >/dev/null
+        echo "deb [signed-by=/etc/apt/keyrings/ngrok.asc] https://ngrok-agent.s3.amazonaws.com/ buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
         sudo apt-get update && sudo apt-get install ngrok
         
+        # تفعيل توكن Ngrok
         ngrok config add-authtoken 2rGoodQZRdc0r24rGd0j30jVwc3_4w7shjjjz3cN3hz9u9gVo
         
-        # نظام الصوت الوهمي
+        # إعداد نظام الصوت الوهمي
         pulseaudio -D --exit-idle-time=-1 || true
         pactl load-module module-null-sink sink_name=VirtualSink || true
         pactl set-default-sink VirtualSink || true
         
+        # تحميل Cloudflared للبث السحابي
         curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
         chmod +x cloudflared
         sudo mv cloudflared /usr/local/bin/
@@ -67,46 +70,50 @@ jobs:
         vlc_process = None
         ffmpeg_process = None
 
+        # تشغيل الشاشة الوهمية بأبعاد البث القديمة الخاصة بك
         subprocess.Popen(["Xvfb", ":99", "-screen", "0", "400x800x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(2)
         os.environ["DISPLAY"] = ":99"
         os.environ["PULSE_SINK"] = "VirtualSink"
 
+        # تصميم لوحة التحكم الاحترافية لـ Go streamer المتوافقة مع الموبايل والمشغلات
         HTML_PANEL = """
         <!DOCTYPE html>
         <html lang="ar" dir="rtl">
         <head>
             <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Go Streamer - لوحة تشغيل بروابط الميديا</title>
             <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap" rel="stylesheet">
             <style>
                 body { font-family: 'Tajawal', sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
-                .container { max-width: 800px; margin: 0 auto; background: #1e293b; padding: 30px; border-radius: 16px; border: 1px solid #334155; }
-                h1 { text-align: center; color: #38bdf8; }
+                .container { max-width: 800px; margin: 0 auto; background: #1e293b; padding: 30px; border-radius: 16px; border: 1px solid #334155; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3); }
+                h1 { text-align: center; color: #38bdf8; margin-bottom: 30px; font-size: 2.2rem; text-shadow: 0 0 10px rgba(56, 189, 248, 0.2); }
                 .form-group { margin-bottom: 20px; }
-                label { display: block; margin-bottom: 8px; color: #94a3b8; }
-                input[type="text"] { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #475569; background-color: #0f172a; color: #fff; box-sizing: border-box; }
-                .btn { width: 100%; background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%); color: white; border: none; padding: 14px; font-size: 1.2rem; font-weight: bold; border-radius: 8px; cursor: pointer; }
+                label { display: block; margin-bottom: 8px; font-weight: bold; color: #94a3b8; }
+                input[type="text"] { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #475569; background-color: #0f172a; color: #fff; box-sizing: border-box; font-size: 1rem; }
+                input[type="text"]:focus { border-color: #38bdf8; outline: none; }
+                .btn { width: 100%; background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%); color: white; border: none; padding: 14px; font-size: 1.2rem; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3); }
                 .status-card { margin-top: 30px; background: #0f172a; padding: 20px; border-radius: 10px; border-left: 4px solid #38bdf8; }
-                .url-box { background: #1e293b; padding: 10px; border-radius: 6px; word-break: break-all; color: #fbbf24; }
+                .url-box { background: #1e293b; padding: 10px; border-radius: 6px; word-break: break-all; font-family: monospace; color: #fbbf24; margin-top: 5px; border: 1px solid #475569; }
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>🚀 Go Streamer (VLC Mode)</h1>
+                <h1>🚀 Go Streamer (VLC Player Mode)</h1>
                 <div class="form-group">
-                    <label>رابط البث أو الفيديو (M3U8 / MPD / Direct Link):</label>
+                    <label>رابط البث أو الفيديو المراد تشغيله (M3U8 / MPD / روابط مباشرة):</label>
                     <input type="text" id="source_url" placeholder="ضع رابط البث المباشر هنا...">
                 </div>
                 <div class="form-group">
-                    <label>نص ثابت (Watermark Text):</label>
-                    <input type="text" id="watermark" placeholder="اكتب النص هنا...">
+                    <label>إضافة نص ثابت داخل البث (Watermark Text):</label>
+                    <input type="text" id="watermark" placeholder="اكتب النص هنا ليظهر أسفل يسار البث...">
                 </div>
                 <button class="btn" onclick="startRestream()">Go Restream 🔥</button>
                 <div class="status-card">
-                    <div>الحالة الحالية: <span id="status" style="color:#34d399;">مستعد</span></div>
+                    <div>الحالة الحالية: <span id="status" style="font-weight:bold; color:#34d399;">مستعد</span></div>
                     <br>
-                    <div>رابط البث السحابي (M3U8):</div>
+                    <div>رابط البث السحابي الجديد (M3U8):</div>
                     <div id="output_url" class="url-box">في انتظار بدء البث...</div>
                 </div>
             </div>
@@ -114,8 +121,8 @@ jobs:
                 function startRestream() {
                     const source = document.getElementById('source_url').value;
                     const text = document.getElementById('watermark').value;
-                    if(!source) { alert('الرجاء إدخال رابط البث!'); return; }
-                    document.getElementById('status').innerText = 'جاري تشغيل الرابط عبر VLC...';
+                    if(!source) { alert('الرجاء إدخال رابط البث أولاً!'); return; }
+                    document.getElementById('status').innerText = 'جاري تشغيل الرابط عبر VLC وتوليد البث...';
                     fetch('/api/start', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -161,6 +168,7 @@ jobs:
                 global stream_status, vlc_process, ffmpeg_process
                 stream_status = "Opening Media Player (VLC)..."
                 try:
+                    # فتح الرابط بملء الشاشة عبر خيارات VLC المخصصة للأنظمة الوهمية cvlc
                     vlc_cmd = ["cvlc", "--fullscreen", "--no-video-title-show", "--no-qt-fs-controller", source_url]
                     vlc_process = subprocess.Popen(vlc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     time.sleep(5)
@@ -170,6 +178,7 @@ jobs:
                     if watermark_text:
                         video_filters = ["-vf", f"drawtext=text='{watermark_text}':x=10:y=h-th-10:fontsize=20:fontcolor=white:box=1:boxcolor=black@0.5"]
 
+                    # التقاط الشاشة المخصصة (400x800) مع دمج الصوت والصورة بنفس طريقتك السابقة تماماً
                     record_cmd = [
                         "ffmpeg", "-f", "x11grab", "-video_size", "400x800", "-framerate", "25", "-i", ":99.0",
                         "-f", "pulse", "-ac", "2", "-i", "VirtualSink.monitor",
@@ -227,16 +236,16 @@ jobs:
 
     - name: Run Go Streamer in Background & Prevent Canceled Error
       run: |
-        # تشغيل السيرفر في الخلفية بشكل منفصل تماماً حتى لا يسبب إلغاء للخطوة
+        # تشغيل في الخلفية لمنع توقف الـ Workflow
         nohup python3 stream_server.py > server.log 2>&1 &
         
         echo "⏳ جاري تهيئة الأنفاق وتوليد روابط لوحة التحكم وبث الـ M3U8..."
-        sleep 10
+        sleep 12
         
-        # طباعة الروابط مباشرة داخل الكونسول لنسخها
+        # طباعة الروابط في صفحة الـ Logs لنسخها فوراً عند بدء التشغيل
         cat server.log | grep -E "Link:" || true
         
-        # حلقة لا نهائية ذكية للحفاظ على بيئة العمل حية ومستقرة بدون توقف
+        # إبقاء الـ Action يعمل بشكل مستمر دون إغلاق تلقائي
         while true; do
           sleep 60
         done
