@@ -1,9 +1,7 @@
-name: Mobile-Mode HLS Restreamer - Auto Play First Video
+name: Go Streamer - Player-Based Restreamer Panel
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '30 6,11,16,21 * * *'
 
 concurrency:
   group: hls-stream-group
@@ -14,34 +12,40 @@ permissions:
 
 jobs:
   run-stream:
-    name: Run HLS Restreamer
+    name: Run Go Streamer Panel
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
-    - name: Setup Tools & Google Chrome & Virtual Audio
+    - name: Setup Tools, VLC Media Player & Virtual Audio
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg python3 python3-pip curl git xvfb pulseaudio pulseaudio-utils xdotool
+        # تثبيت VLC وادوات الشاشة الوهمية والصوت
+        sudo apt-get install -y ffmpeg python3 python3-pip curl git xvfb pulseaudio pulseaudio-utils xdotool vlc
         
-        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-        echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-        sudo apt-get update
-        sudo apt-get install -y google-chrome-stable
+        pip3 install flask requests
         
-        pip3 install selenium webdriver-manager
+        # تثبيت ngrok الرسمي
+        curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.dev/ngrok.asc >/dev/null
+        echo "deb [signed-by=/etc/apt/trusted.gpg.dev/ngrok.asc] https://ngrok-agent.s3.amazonaws.com/ buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+        sudo apt-get update && sudo apt-get install ngrok
         
+        # تفعيل توكن Ngrok الخاص بك
+        ngrok config add-authtoken 2rGoodQZRdc0r24rGd0j30jVwc3_4w7shjjjz3cN3hz9u9gVo
+        
+        # إعداد نظام الصوت الوهمي
         pulseaudio -D --exit-idle-time=-1 || true
         pactl load-module module-null-sink sink_name=VirtualSink || true
         pactl set-default-sink VirtualSink || true
         
+        # تثبيت Cloudflared للـ M3U8
         curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
         chmod +x cloudflared
         sudo mv cloudflared /usr/local/bin/
 
-    - name: Create and Run Stream Server
+    - name: Create and Run Go Streamer Server (VLC Version)
       run: |
         cat << 'EOF' > stream_server.py
         import subprocess
@@ -49,220 +53,247 @@ jobs:
         import time
         import sys
         import re
-        import datetime
         import shutil
-        import urllib.request
         import json
-        from http.server import SimpleHTTPRequestHandler, HTTPServer
         import threading
+        from http.server import SimpleHTTPRequestHandler, HTTPServer
+        from flask import Flask, render_template_string, request, jsonify
 
-        from selenium import webdriver
-        from selenium.webdriver.chrome.service import Service as ChromeService
-        from webdriver_manager.chrome import ChromeDriverManager
-        from selenium.webdriver.chrome.options import Options
-        from selenium.webdriver.common.keys import Keys
+        app = Flask(__name__)
 
-        # 🔐 إعدادات التحكم عن بعد
-        FB_POST_ID = "61591711540229_122105325825390384"
-        FB_ACCESS_TOKEN = "EAANvxZBsQD30BR0Nn0kAQYFGmHcZBOZBedfuZBHWjRbpsf21WcCIjYaZARho35ACoeT7ciL2NjJIpgLMZAZCsZBgW4kHZBpRXTkcSLUXoOMFgGZAkjoZARLYZB6iZCZCvz4393TVd7REaKZBbkM9M3jH7kAujyOws5hLynwy9Oo340AJEoFzBqzUKdsqz6hdRn8pwoBx3CBaW3U"
-        CONTROL_API_URL = f"https://graph.facebook.com/v18.0/{FB_POST_ID}?fields=message&access_token={FB_ACCESS_TOKEN}"
-
-        # 📱 رابط يوتيوب الموبايل للبحث مباشرة
-        INPUT_URL = "https://m.youtube.com/results?search_query=funny+videos"
         HLS_DIR = os.path.abspath("hls_stream")
+        if os.path.exists(HLS_DIR): shutil.rmtree(HLS_DIR)
+        os.makedirs(HLS_DIR, exist_ok=True)
 
-        active_driver = None
+        # الحالات العامة للمشروع
+        stream_status = "Stopped"
+        output_m3u8_url = "Not Generated Yet"
+        vlc_process = None
+        ffmpeg_process = None
 
-        # 🐭 دالة لحقن وتحديث مؤشر الفأرة المرئي على الشاشة داخل المتصفح لكي يظهر في فيديو البث
-        def update_visual_cursor(driver, x, y):
-            try:
-                js_cursor_code = f"""
-                var cursor = document.getElementById('virtual-mouse-cursor');
-                if (!cursor) {{
-                    cursor = document.createElement('div');
-                    cursor.id = 'virtual-mouse-cursor';
-                    cursor.style.position = 'fixed';
-                    cursor.style.width = '18px';
-                    cursor.style.height = '18px';
-                    cursor.style.backgroundColor = 'rgba(255, 0, 0, 0.8)';
-                    cursor.style.border = '2px solid white';
-                    cursor.style.borderRadius = '50%';
-                    cursor.style.zIndex = '9999999';
-                    cursor.style.pointerEvents = 'none';
-                    cursor.style.boxShadow = '0 0 6px rgba(0,0,0,0.6)';
-                    cursor.style.transition = 'all 0.08s ease-out';
-                    document.body.appendChild(cursor);
-                }}
-                cursor.style.left = '{x}px';
-                cursor.style.top = '{y}px';
-                """
-                driver.execute_script(js_cursor_code)
-            except Exception as e:
-                pass
+        # تشغيل الشاشة الوهمية مسبقاً بأبعاد البث الخاصة بك
+        subprocess.Popen(["Xvfb", ":99", "-screen", "0", "400x800x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(2)
+        os.environ["DISPLAY"] = ":99"
+        os.environ["PULSE_SINK"] = "VirtualSink"
 
-        # 📡 الاستماع للتحكم عن بعد باستخدام xdotool لتحريك الماوس الحقيقي داخل نظام X11
-        def remote_control_listener():
-            global active_driver
-            last_command_id = ""
-            # ربط البيئة لـ xdotool للوصول لسطح المكتب الوهمي
-            os.environ["DISPLAY"] = ":99"
-            
-            while True:
-                if active_driver is not None:
-                    try:
-                        req = urllib.request.Request(CONTROL_API_URL, headers={'User-Agent': 'Mozilla/5.0'})
-                        with urllib.request.urlopen(req, timeout=5) as response:
-                            data = json.loads(response.read().decode())
-                            message = data.get("message", "")
-                            try:
-                                cmd_data = json.loads(message)
-                                action = cmd_data.get("action")
-                                cmd_id = cmd_data.get("id")
-                                
-                                if action and cmd_id != last_command_id:
-                                    last_command_id = cmd_id
-                                    driver = active_driver
-                                    
-                                    if driver:
-                                        x = cmd_data.get("x", 200)
-                                        y = cmd_data.get("y", 400)
-                                        
-                                        # 1. تحريك مؤشر الماوس الحقيقي في نظام التشغيل
-                                        subprocess.run(["xdotool", "mousemove", str(x), str(y)])
-                                        
-                                        # 2. مزامنة مؤشر الماوس المرئي في المتصفح ليظهر داخل البث
-                                        update_visual_cursor(driver, x, y)
-                                        
-                                        if action == "move":
-                                            print(f"🖱️ xdotool: تحريك الفأرة الحقيقية إلى ({x}, {y})")
-                                            
-                                        elif action == "click":
-                                            subprocess.run(["xdotool", "click", "1"])
-                                            print(f"🖱️ xdotool: نقر زر أيسر عند ({x}, {y})")
-                                            
-                                        elif action == "double_click":
-                                            subprocess.run(["xdotool", "click", "--repeat", "2", "--delay", "100", "1"])
-                                            print(f"🖱️ xdotool: نقر مزدوج عند ({x}, {y})")
-                                            
-                                        elif action == "right_click":
-                                            subprocess.run(["xdotool", "click", "3"])
-                                            print(f"🖱️ xdotool: نقر زر أيمن عند ({x}, {y})")
-                                            
-                                        elif action == "drag_and_drop":
-                                            to_x = cmd_data.get("to_x", x)
-                                            to_y = cmd_data.get("to_y", y + 150)
-                                            # محاكاة السحب والإفلات عبر xdotool
-                                            subprocess.run(["xdotool", "mousemove", str(x), str(y)])
-                                            subprocess.run(["xdotool", "mousedown", "1"])
-                                            time.sleep(0.1)
-                                            subprocess.run(["xdotool", "mousemove", str(to_x), str(to_y)])
-                                            time.sleep(0.1)
-                                            subprocess.run(["xdotool", "mouseup", "1"])
-                                            update_visual_cursor(driver, to_x, to_y)
-                                            print(f"🖱️ xdotool: سحب وإفلات من ({x}, {y}) إلى ({to_x}, {to_y})")
-                                            
-                                        elif action == "scroll":
-                                            amount = cmd_data.get("amount", -300)
-                                            # في xdotool: الزر 4 هو التمرير للأعلى (Scroll Up)، والزر 5 هو التمرير للأسفل (Scroll Down)
-                                            button = "5" if amount < 0 else "4"
-                                            # تكرار أمر التمرير عدة مرات بناءً على القوة المطلوبة
-                                            scroll_clicks = min(max(abs(amount) // 50, 1), 10)
-                                            for _ in range(scroll_clicks):
-                                                subprocess.run(["xdotool", "click", button])
-                                                time.sleep(0.05)
-                                            print(f"🖱️ xdotool: تمرير عجلات ({'أسفل' if button == '5' else 'أعلى'})")
-                                            
-                            except Exception as parse_err:
-                                pass
-                    except Exception as fetch_err:
-                        pass
-                time.sleep(0.3)
+        # واجهة التحكم الاحترافية بتصميم Go streamer العصري
+        HTML_PANEL = """
+        <!DOCTYPE html>
+        <html lang="ar" dir="rtl">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Go Streamer - لوحة تشغيل بروابط الميديا</title>
+            <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap" rel="stylesheet">
+            <style>
+                body {
+                    font-family: 'Tajawal', sans-serif;
+                    background-color: #0f172a;
+                    color: #f8fafc;
+                    margin: 0;
+                    padding: 20px;
+                }
+                .container {
+                    max-width: 800px;
+                    margin: 0 auto;
+                    background: #1e293b;
+                    padding: 30px;
+                    border-radius: 16px;
+                    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+                    border: 1px solid #334155;
+                }
+                h1 {
+                    text-align: center;
+                    color: #38bdf8;
+                    margin-bottom: 30px;
+                    font-size: 2.5rem;
+                    text-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+                }
+                .form-group {
+                    margin-bottom: 20px;
+                }
+                label {
+                    display: block;
+                    margin-bottom: 8px;
+                    font-weight: bold;
+                    color: #94a3b8;
+                }
+                input[type="text"] {
+                    width: 100%;
+                    padding: 12px;
+                    border-radius: 8px;
+                    border: 1px solid #475569;
+                    background-color: #0f172a;
+                    color: #fff;
+                    box-sizing: border-box;
+                    font-size: 1rem;
+                    transition: border 0.3s;
+                }
+                input[type="text"]:focus {
+                    border-color: #38bdf8;
+                    outline: none;
+                }
+                .btn {
+                    width: 100%;
+                    background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+                    color: white;
+                    border: none;
+                    padding: 14px;
+                    font-size: 1.2rem;
+                    font-weight: bold;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    transition: opacity 0.2s;
+                    box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);
+                }
+                .btn:hover { opacity: 0.9; }
+                .status-card {
+                    margin-top: 30px;
+                    background: #0f172a;
+                    padding: 20px;
+                    border-radius: 10px;
+                    border-left: 4px solid #38bdf8;
+                }
+                .status-item {
+                    margin-bottom: 10px;
+                    font-size: 1.1rem;
+                }
+                .status-value { font-weight: bold; color: #34d399; }
+                .url-box {
+                    background: #1e293b;
+                    padding: 10px;
+                    border-radius: 6px;
+                    word-break: break-all;
+                    font-family: monospace;
+                    color: #fbbf24;
+                    margin-top: 5px;
+                    border: 1px solid #475569;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>🚀 Go Streamer (VLC Mode)</h1>
+                <div class="form-group">
+                    <label>رابط البث أو الفيديو المراد تشغيله (M3U8 / MPD / Direct Link):</label>
+                    <input type="text" id="source_url" placeholder="ضع رابط البث المباشر هنا...">
+                </div>
+                <div class="form-group">
+                    <label>إضافة نص ثابت داخل البث (Watermark Text):</label>
+                    <input type="text" id="watermark" placeholder="اكتب النص هنا ليظهر أسفل يسار الفيديو...">
+                </div>
+                <button class="btn" onclick="startRestream()">Go Restream 🔥</button>
 
-        def start_screen_recording_pipeline():
-            global active_driver
-            if os.path.exists(HLS_DIR): shutil.rmtree(HLS_DIR)
-            os.makedirs(HLS_DIR, exist_ok=True)
-            
-            # تشغيل شاشة وهمية بأبعاد هاتف عمودي
-            subprocess.Popen(["Xvfb", ":99", "-screen", "0", "400x800x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(2)
-            os.environ["DISPLAY"] = ":99"
-            os.environ["PULSE_SINK"] = "VirtualSink"
+                <div class="status-card">
+                    <div class="status-item">الحالة الحالية: <span id="status" class="status-value">مستعد</span></div>
+                    <div class="status-item">رابط البث السحابي الجديد (M3U8):</div>
+                    <div id="output_url" class="url-box">في انتظار بدء البث...</div>
+                </div>
+            </div>
 
-            def stream_loop():
-                global active_driver
-                while True:
-                    try:
-                        chrome_options = Options()
-                        chrome_options.add_argument("--no-sandbox")
-                        chrome_options.add_argument("--disable-dev-shm-usage")
-                        chrome_options.add_argument("--disable-gpu")
-                        chrome_options.add_argument("--hide-scrollbars")
-                        
-                        # 📲 محاكاة متصفح الهاتف
-                        mobile_emulation = {
-                            "deviceMetrics": { "width": 400, "height": 800, "pixelRatio": 3.0, "touch": False },
-                            "userAgent": "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, integrate Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
+            <script>
+                function startRestream() {
+                    const source = document.getElementById('source_url').value;
+                    const text = document.getElementById('watermark').value;
+                    if(!source) { alert('الرجاء إدخال رابط البث أولاً!'); return; }
+                    
+                    document.getElementById('status').innerText = 'جاري تشغيل الرابط عبر VLC وتوليد البث...';
+                    
+                    fetch('/api/start', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({source: source, watermark: text})
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if(data.success) {
+                            checkStatus();
                         }
-                        chrome_options.add_experimental_option("mobileEmulation", mobile_emulation)
-                        chrome_options.add_argument("--autoplay-policy=no-user-gesture-required")
+                    });
+                }
 
-                        active_driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=chrome_options)
-                        active_driver.set_window_size(400, 800)
-                        
-                        active_driver.get(INPUT_URL)
-                        time.sleep(8) # انتظار تحميل صفحة البحث
-                        
-                        # ⚡ تشغيل أول فيديو تلقائياً بمجرد فتح الصفحة
-                        try:
-                            js_click_first = """
-                            var firstVideo = document.querySelector('ytm-media-item, ytm-video-with-context-renderer, a.media-item-thumbnail-container, a[href*="/watch"]');
-                            if (firstVideo) {
-                                firstVideo.click();
-                                console.log("✅ First video launched automatically!");
+                function checkStatus() {
+                    setInterval(() => {
+                        fetch('/api/status')
+                        .then(res => res.json())
+                        .then(data => {
+                            document.getElementById('status').innerText = data.status;
+                            if(data.output !== "Not Generated Yet") {
+                                document.getElementById('output_url').innerText = data.output + "/stream.m3u8";
                             }
-                            """
-                            active_driver.execute_script(js_click_first)
-                            print("🎉 تم تشغيل أول فيديو تلقائياً بنجاح!")
-                        except Exception as auto_err:
-                            print(f"⚠️ فشل التشغيل التلقائي: {auto_err}")
+                        });
+                    }, 2000);
+                }
+            </script>
+        </body>
+        </html>
+        """
 
-                        time.sleep(2)
+        @app.route('/')
+        def index():
+            return render_template_string(HTML_PANEL)
 
-                        # وضع مؤشر الماوس الحقيقي والمرئي في المنتصف بشكل افتراضي
-                        subprocess.run(["xdotool", "mousemove", "200", "400"])
-                        update_visual_cursor(active_driver, 200, 400)
+        @app.route('/api/status')
+        def get_status():
+            global stream_status, output_m3u8_url
+            return jsonify({"status": stream_status, "output": output_m3u8_url})
 
-                        # ستايل إبراز العناصر النشطة وإخفاء المؤشرات غير المرغوب فيها
-                        try:
-                            active_driver.execute_script("""
-                                var style = document.createElement('style');
-                                style.innerHTML = '* { cursor: none !important; } :focus { outline: 5px solid red !important; outline-offset: 2px !important; }';
-                                document.head.appendChild(style);
-                            """)
-                        except:
-                            pass
+        @app.route('/api/start', methods=['POST'])
+        def start_restream_api():
+            global stream_status, vlc_process, ffmpeg_process
+            data = request.json
+            source_url = data.get("source")
+            watermark_text = data.get("watermark", "")
+            
+            # إغلاق أي مشغل أو بث قديم يعمل حالياً لتفريغ الرام والمعالج
+            if vlc_process:
+                try: vlc_process.terminate()
+                except: pass
+            if ffmpeg_process:
+                try: ffmpeg_process.terminate()
+                except: pass
 
-                        # تسجيل الشاشة الطولية (بأبعاد الموبايل)
-                        record_cmd = [
-                            "ffmpeg", "-f", "x11grab", "-video_size", "400x800", "-framerate", "25", "-i", ":99.0",
-                            "-f", "pulse", "-ac", "2", "-i", "VirtualSink.monitor",
-                            "-c:v", "libx264", "-preset", "ultrafast", "-g", "50",
-                            "-c:a", "aac", "-b:a", "128k",
-                            "-f", "hls", "-hls_time", "2", "-hls_list_size", "5", "-hls_flags", "delete_segments",
-                            os.path.join(HLS_DIR, "stream.m3u8")
-                        ]
-                        proc = subprocess.Popen(record_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        while proc.poll() is None:
-                            time.sleep(5)
-                            try: _ = active_driver.current_url
-                            except: break
-                        proc.terminate()
-                        active_driver.quit()
-                    except Exception as err:
-                        print(f"⚠️ خطأ متصفح: {err}")
-                        time.sleep(5)
-            threading.Thread(target=stream_loop, daemon=True).start()
+            def media_stream_pipeline():
+                global stream_status, vlc_process, ffmpeg_process
+                stream_status = "Opening Media Player (VLC)..."
+                
+                try:
+                    # تشغيل VLC داخل الشاشة الوهمية بوضع ملء الشاشة وبدون واجهة تحكم معقدة لضمان نظافة البث
+                    vlc_cmd = [
+                        "cvlc", "--fullscreen", "--no-video-title-show", "--no-qt-fs-controller", 
+                        source_url
+                    ]
+                    vlc_process = subprocess.Popen(vlc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    # وقت قصير ليتأكد النفاذ للرابط والتشغيل الكامل داخل الشاشة الوهمية
+                    time.sleep(4)
+
+                    stream_status = "Streaming Player Screen Live"
+                    
+                    # إعداد فلتر النص لعرضه أسفل اليسار في التقاط الـ X11
+                    video_filters = []
+                    if watermark_text:
+                        video_filters = ["-vf", f"drawtext=text='{watermark_text}':x=10:y=h-th-10:fontsize=20:fontcolor=white:box=1:boxcolor=black@0.5"]
+
+                    # التقاط كامل الشاشة الوهمية الحالية وبثها كـ HLS بنفس نظام الكود القديم
+                    record_cmd = [
+                        "ffmpeg", "-f", "x11grab", "-video_size", "400x800", "-framerate", "25", "-i", ":99.0",
+                        "-f", "pulse", "-ac", "2", "-i", "VirtualSink.monitor",
+                        "-c:v", "libx264", "-preset", "ultrafast", "-g", "50"
+                    ] + video_filters + [
+                        "-c:a", "aac", "-b:a", "128k",
+                        "-f", "hls", "-hls_time", "2", "-hls_list_size", "5", "-hls_flags", "delete_segments",
+                        os.path.join(HLS_DIR, "stream.m3u8")
+                    ]
+                    
+                    ffmpeg_process = subprocess.Popen(record_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                except Exception as e:
+                    stream_status = f"Error: {str(e)}"
+
+            threading.Thread(target=media_stream_pipeline, daemon=True).start()
+            return jsonify({"success": True})
 
         def run_custom_server():
             class Handler(SimpleHTTPRequestHandler):
@@ -270,25 +301,12 @@ jobs:
                 def end_headers(self): 
                     self.send_header('Access-Control-Allow-Origin', '*')
                     super().end_headers()
-            HTTPServer(('0.0.0.0', 8000), Handler).serve_forever()
+            try: HTTPServer(('0.0.0.0', 8000), Handler).serve_forever()
+            except: pass
 
-        # 📝 رفع وحفظ ملف الـ playlist.m3u لـ GitHub تلقائياً
-        def update_github_playlist(url):
-            try:
-                content = f'#EXTM3U\n#EXTINF:-1 tvg-name="YouTube Mobile" group-title="Live",YouTube Mobile\n{url}/stream.m3u8\n'
-                with open("playlist.m3u", "w") as f: f.write(content)
-                subprocess.run(["git", "config", "--global", "user.name", "github-actions"])
-                subprocess.run(["git", "config", "--global", "user.email", "actions@github.com"])
-                subprocess.run(["git", "add", "playlist.m3u"])
-                subprocess.run(["git", "commit", "-m", "Update Mobile Stream M3U Playlist"])
-                subprocess.run(["git", "push"])
-                print("✅ تم بنجاح إنشاء رابط الـ m3u وتحديثه في مستودع GitHub الخاص بك!")
-            except Exception as e:
-                print(f"⚠️ فشل تحديث Git: {e}")
-
-        # 🔗 الحصول على رابط البث الخارجي عبر Cloudflare
-        def start_tunnel():
-            print("🚀 بدء نفق Cloudflare...")
+        def start_cloudflare_tunnel():
+            global output_m3u8_url
+            print("🚀 بدء نفق Cloudflare لتوليد الـ M3U8 الجديد...")
             cmd = ["cloudflared", "tunnel", "--url", "http://localhost:8000"]
             proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
             while True:
@@ -298,18 +316,29 @@ jobs:
                     continue
                 match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line)
                 if match:
-                    url = match.group(0)
-                    print(f"🔗 تم إنشاء الرابط السحابي: {url}")
-                    update_github_playlist(url)
+                    output_m3u8_url = match.group(0)
+                    print(f"🔗 رابط البث السحابي الجديد: {output_m3u8_url}/stream.m3u8")
                     break
 
-        if __name__ == "__main__":
-            threading.Thread(target=remote_control_listener, daemon=True).start()
-            start_screen_recording_pipeline()
-            threading.Thread(target=run_custom_server, daemon=True).start()
+        def start_ngrok_panel():
+            print("🌐 جاري تشغيل نفق Ngrok للوحة التحكم...")
+            subprocess.Popen(["ngrok", "http", "5000"], stdout=subprocess.DEVNULL)
             time.sleep(3)
-            start_tunnel()
-            time.sleep(18000)
+            try:
+                import requests
+                res = requests.get("http://127.0.0.1:4040/api/tunnels").json()
+                public_url = res['tunnels'][0]['public_url']
+                print("\n" + "="*60)
+                print(f"🔗 رابط لوحة التحكم Go streamer العام:\n👉 {public_url} 👈")
+                print("="*60 + "\n")
+            except Exception as e:
+                print(f"⚠️ تعذر جلب رابط Ngrok تلقائياً: {e}")
+
+        if __name__ == "__main__":
+            threading.Thread(target=run_custom_server, daemon=True).start()
+            threading.Thread(target=start_cloudflare_tunnel, daemon=True).start()
+            threading.Thread(target=start_ngrok_panel, daemon=True).start()
+            app.run(host='0.0.0.0', port=5000)
         EOF
         
         python3 stream_server.py
