@@ -19,10 +19,10 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Setup Tools, VLC Media Player & Virtual Audio
+    - name: Setup Tools, MPlayer & Virtual Audio
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg python3 python3-pip curl git xvfb pulseaudio pulseaudio-utils xdotool vlc
+        sudo apt-get install -y ffmpeg python3 python3-pip curl git xvfb pulseaudio pulseaudio-utils mplayer
         
         pip3 install flask requests
         
@@ -66,11 +66,11 @@ jobs:
 
         stream_status = "Stopped"
         output_m3u8_url = "Not Generated Yet"
-        vlc_process = None
+        player_process = None
         ffmpeg_process = None
         cf_process = None
 
-        # تشغيل شاشة وهمية بأبعاد HD دقيقة
+        # تشغيل الشاشة الوهمية بأبعاد HD دقيقة وثابتة
         subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x720x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(2)
         os.environ["DISPLAY"] = ":99"
@@ -83,7 +83,7 @@ jobs:
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
             return response
 
-        # تصميم واجهة اللوحة
+        # لوحة التحكم
         HTML_PANEL = """
         <!DOCTYPE html>
         <html lang="ar" dir="rtl">
@@ -295,14 +295,14 @@ jobs:
 
         @app.route('/api/stop', methods=['POST'])
         def stop_restream_api():
-            global stream_status, vlc_process, ffmpeg_process, cf_process, output_m3u8_url
+            global stream_status, player_process, ffmpeg_process, cf_process, output_m3u8_url
             stream_status = "Stopped"
             output_m3u8_url = "Not Generated Yet"
             
-            if vlc_process:
-                try: vlc_process.terminate()
+            if player_process:
+                try: player_process.terminate()
                 except: pass
-                vlc_process = None
+                player_process = None
             if ffmpeg_process:
                 try: ffmpeg_process.terminate()
                 except: pass
@@ -318,13 +318,13 @@ jobs:
 
         @app.route('/api/start', methods=['POST'])
         def start_restream_api():
-            global stream_status, vlc_process, ffmpeg_process, cf_process, output_m3u8_url
+            global stream_status, player_process, ffmpeg_process, cf_process, output_m3u8_url
             data = request.json
             source_url = data.get("source")
             watermark_text = data.get("watermark", "")
             
-            if vlc_process:
-                try: vlc_process.terminate()
+            if player_process:
+                try: player_process.terminate()
                 except: pass
             if ffmpeg_process:
                 try: ffmpeg_process.terminate()
@@ -338,7 +338,7 @@ jobs:
             os.makedirs(HLS_DIR, exist_ok=True)
 
             def media_stream_pipeline():
-                global stream_status, vlc_process, ffmpeg_process, cf_process, output_m3u8_url
+                global stream_status, player_process, ffmpeg_process, cf_process, output_m3u8_url
                 stream_status = "Generating New Cloudflare Tunnel..."
                 
                 cf_log_file = "cloudflared.log"
@@ -365,40 +365,30 @@ jobs:
                                 break
 
                 if not tunnel_found:
-                    output_m3u8_url = "Generating Tunnel URL... Please wait 5 seconds and refresh"
+                    output_m3u8_url = "Generating Tunnel URL... Please wait 5 seconds"
 
                 stream_status = "Opening Media Connection (Anti-Freeze)..."
                 try:
-                    # تعديل الأوامر: منع التكبير التلقائي وقفل النسب القياسية 16:9 بشكل مباشر وصحيح
-                    vlc_cmd = [
-                        "cvlc", 
-                        "--no-video-title-show", 
-                        "--no-qt-fs-controller", 
-                        "--video-aspect-ratio=16:9",
-                        "--no-video-autoscale",
-                        "--network-caching=6000",
-                        "--file-caching=6000",
-                        "--live-caching=6000",
-                        "--drop-late-frames",
-                        "--skip-frames",
+                    # تشغيل MPlayer بخصائص تمنع التمديد وتحمي أبعاد الفيديو وتملأ المساحة 1280x720 بشكل ممتاز
+                    mplayer_cmd = [
+                        "mplayer",
+                        "-fs",                             # تشغيل بملء الشاشة داخل البيئة الوهمية
+                        "-zoom",                           # تفعيل التكبير المحمي للأبعاد
+                        "-aspect", "16:9",                 # إجبار النسبة القياسية 16:9 لمنع تمديد الأطراف واختفاء اللوجو
+                        "-fixed-vo",                       # الحفاظ على ثبات الشاشة وتجنب الشاشات السوداء
+                        "-cache", "8192",                  # ذاكرة مؤقتة ممتازة لحماية البث من التقطيع
                         source_url
                     ]
-                    vlc_process = subprocess.Popen(vlc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    time.sleep(5)
-
-                    # استخدام xdotool لجعل النافذة ملء الشاشة طبيعياً بدون تمديد أو اقتطاع للبث
-                    subprocess.run(["xdotool", "search", "--class", "vlc", "windowactivate"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    subprocess.run(["xdotool", "search", "--class", "vlc", "windowsize", "1280", "720"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    subprocess.run(["xdotool", "search", "--class", "vlc", "windowmove", "0", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    time.sleep(2)
+                    player_process = subprocess.Popen(mplayer_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    time.sleep(4)
 
                     stream_status = "Streaming Player Screen Live"
                     
-                    # التقاط الشاشة والمحافظة على النطاق والأطراف سليمة بنسبة 100%
                     video_filters = ["-vf", "scale=1280:720"]
                     if watermark_text:
                         video_filters = ["-vf", f"scale=1280:720,drawtext=text='{watermark_text}':x=15:y=h-th-15:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.5"]
 
+                    # التقاط الشاشة الوهمية بثبات كامل
                     record_cmd = [
                         "ffmpeg", "-f", "x11grab", "-video_size", "1280x720", "-framerate", "25", "-i", ":99.0",
                         "-f", "pulse", "-ac", "2", "-i", "VirtualSink.monitor",
@@ -430,7 +420,7 @@ jobs:
             app.run(host='0.0.0.0', port=5000)
         EOF
 
-    - name: Run Go Streamer in Background & Prevent Canceled Error
+    - name: Run Go Streamer Panel
       run: |
         nohup python3 stream_server.py > server.log 2>&1 &
         
