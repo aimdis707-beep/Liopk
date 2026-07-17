@@ -83,7 +83,7 @@ jobs:
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
             return response
 
-        # تصميم لوحة تحكم متجاوب بالكامل مع الهواتف ومزود بالأيقونات الحديثة
+        # تصميم لوحة تحكم فخم ومتوافق بالكامل مع الهواتف ومزود بالأيقونات الحديثة
         HTML_PANEL = """
         <!DOCTYPE html>
         <html lang="ar" dir="rtl">
@@ -369,13 +369,13 @@ jobs:
 
                 stream_status = "Opening Media Connection (Anti-Freeze)..."
                 try:
-                    # تم إزالة "--video-wallpaper" و "--fullscreen" اللذين يسببان الزووم التلقائي
-                    # استخدام خيارات العرض المباشر (Fit Window) دون تمديد أو تشويه مع تفعيل كاش قوي لمنع التقطيع
+                    # تفعيل وضع ملء الشاشة الفعلي (Fullscreen) مع تعطيل أدوات التحكم
+                    # لضمان فرد الفيديو على مساحة الـ 1280x720 الكاملة دون تغيير أبعاده الأصلية ودون زووم
                     vlc_cmd = [
                         "cvlc", 
+                        "--fullscreen",
                         "--no-video-title-show", 
                         "--no-qt-fs-controller", 
-                        "--window-properties", "width=1280,height=720",
                         "--network-caching=6000",
                         "--file-caching=6000",
                         "--live-caching=6000",
@@ -384,21 +384,20 @@ jobs:
                         source_url
                     ]
                     vlc_process = subprocess.Popen(vlc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    time.sleep(4)
+                    time.sleep(5)
 
-                    # إجبار نافذة المشغل على احتلال أبعاد الشاشة الوهمية كاملة بدقة (1280x720) دون تضخيم
-                    subprocess.run(["xdotool", "search", "--sync", "--onlyvisible", "--class", "vlc", "windowsize", "1280", "720"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    subprocess.run(["xdotool", "search", "--sync", "--onlyvisible", "--class", "vlc", "windowmove", "0", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    # نقل التركيز للنافذة لتجنب أي مشاكل تقطير أو ظهور قوائم جانبية
+                    subprocess.run(["xdotool", "search", "--sync", "--onlyvisible", "--class", "vlc", "windowactivate"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     time.sleep(1)
 
                     stream_status = "Streaming Player Screen Live"
                     
-                    # التقاط كامل الشاشة الوهمية دون أي فلاتر تشوه الأبعاد الأصلية للصورة
+                    # الفلاتر تلتقط الأبعاد الحقيقية 1280x720 مباشرة دون تعديل الأبعاد الأصلية (Aspect Ratio)
                     video_filters = ["-vf", "scale=1280:720"]
                     if watermark_text:
                         video_filters = ["-vf", f"scale=1280:720,drawtext=text='{watermark_text}':x=15:y=h-th-15:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.5"]
 
-                    # إعدادات الـ FFmpeg المعدلة للحصول على بث فائق الاستقرار وسرعة استجابة عالية
+                    # تشغيل الفلاتر وتحويل الشاشة بدقة لبث HLS ثابت
                     record_cmd = [
                         "ffmpeg", "-f", "x11grab", "-video_size", "1280x720", "-framerate", "25", "-i", ":99.0",
                         "-f", "pulse", "-ac", "2", "-i", "VirtualSink.monitor",
