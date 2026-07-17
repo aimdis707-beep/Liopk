@@ -70,7 +70,7 @@ jobs:
         ffmpeg_process = None
         cf_process = None
 
-        # تشغيل الشاشة الوهمية بأبعاد HD القياسية
+        # تشغيل شاشة وهمية قياسية 1280x720 لضمان مطابقة الـ FFmpeg دون الحاجة لتقليص الأبعاد
         subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x720x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(2)
         os.environ["DISPLAY"] = ":99"
@@ -83,7 +83,7 @@ jobs:
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
             return response
 
-        # تصميم لوحة تحكم بسيط، فخم، متوافق كلياً مع الموبايل ومزود بأيقونات FontAwesome
+        # تصميم لوحة تحكم متجاوب بالكامل مع الهواتف ومزود بالأيقونات الحديثة
         HTML_PANEL = """
         <!DOCTYPE html>
         <html lang="ar" dir="rtl">
@@ -341,7 +341,6 @@ jobs:
                 global stream_status, vlc_process, ffmpeg_process, cf_process, output_m3u8_url
                 stream_status = "Generating New Cloudflare Tunnel..."
                 
-                # تشغيل نفق Cloudflare وحفظ مخرجاته في ملف لوج مؤقت لتجنب تجميد الـ buffer
                 cf_log_file = "cloudflared.log"
                 if os.path.exists(cf_log_file): os.remove(cf_log_file)
                 
@@ -349,7 +348,6 @@ jobs:
                 with open(cf_log_file, "w") as out:
                     cf_process = subprocess.Popen(cmd, stderr=out, stdout=subprocess.DEVNULL, text=True)
                 
-                # قراءة الملف حتى استخراج الرابط بشكل صحيح
                 attempts = 0
                 tunnel_found = False
                 while attempts < 30:
@@ -361,7 +359,6 @@ jobs:
                             match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', content)
                             if match:
                                 new_tunnel_url = match.group(0)
-                                # إضافة تأخير طفيف مدته 3 ثوانٍ للتأكد من ربط نطاق DNS لـ Cloudflare بالكامل عالمياً لتجنب NXDOMAIN
                                 time.sleep(3)
                                 output_m3u8_url = f"{new_tunnel_url}/hls/stream.m3u8"
                                 tunnel_found = True
@@ -372,17 +369,16 @@ jobs:
 
                 stream_status = "Opening Media Connection (Anti-Freeze)..."
                 try:
-                    # تعديل خيارات VLC لتعمل بدون زووم إجباري لمنع قص أطراف القناة وشعارها
+                    # تم إزالة "--video-wallpaper" و "--fullscreen" اللذين يسببان الزووم التلقائي
+                    # استخدام خيارات العرض المباشر (Fit Window) دون تمديد أو تشويه مع تفعيل كاش قوي لمنع التقطيع
                     vlc_cmd = [
                         "cvlc", 
-                        "--fullscreen", 
                         "--no-video-title-show", 
                         "--no-qt-fs-controller", 
-                        "--video-wallpaper",
-                        "--aspect-ratio=16:9",
-                        "--network-caching=5000",
-                        "--file-caching=5000",
-                        "--live-caching=5000",
+                        "--window-properties", "width=1280,height=720",
+                        "--network-caching=6000",
+                        "--file-caching=6000",
+                        "--live-caching=6000",
                         "--drop-late-frames",
                         "--skip-frames",
                         source_url
@@ -390,15 +386,17 @@ jobs:
                     vlc_process = subprocess.Popen(vlc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     time.sleep(4)
 
-                    subprocess.run(["xdotool", "search", "--sync", "--onlyvisible", "--class", "vlc", "windowactivate", "key", "f"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    # إجبار نافذة المشغل على احتلال أبعاد الشاشة الوهمية كاملة بدقة (1280x720) دون تضخيم
+                    subprocess.run(["xdotool", "search", "--sync", "--onlyvisible", "--class", "vlc", "windowsize", "1280", "720"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run(["xdotool", "search", "--sync", "--onlyvisible", "--class", "vlc", "windowmove", "0", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     time.sleep(1)
 
                     stream_status = "Streaming Player Screen Live"
                     
-                    # الفلاتر المخصصة لمنع تشوه الأبعاد واستقرار الصورة الكاملة دون قص
-                    video_filters = ["-vf", "scale=1280:720,setdar=16/9"]
+                    # التقاط كامل الشاشة الوهمية دون أي فلاتر تشوه الأبعاد الأصلية للصورة
+                    video_filters = ["-vf", "scale=1280:720"]
                     if watermark_text:
-                        video_filters = ["-vf", f"scale=1280:720,setdar=16/9,drawtext=text='{watermark_text}':x=15:y=h-th-15:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.5"]
+                        video_filters = ["-vf", f"scale=1280:720,drawtext=text='{watermark_text}':x=15:y=h-th-15:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.5"]
 
                     # إعدادات الـ FFmpeg المعدلة للحصول على بث فائق الاستقرار وسرعة استجابة عالية
                     record_cmd = [
