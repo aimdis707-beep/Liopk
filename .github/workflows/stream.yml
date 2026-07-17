@@ -230,23 +230,31 @@ jobs:
                 global stream_status, vlc_process, ffmpeg_process, cf_process, output_m3u8_url
                 stream_status = "Generating New Cloudflare Tunnel..."
                 
+                # تشغيل نفق Cloudflare الجديد في الخلفية وتجنب تعليق الكود الرئيسي
                 cmd = ["cloudflared", "tunnel", "--url", "http://localhost:5000"]
-                cf_process = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+                cf_process = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
                 
-                while True:
-                    line = cf_process.stderr.readline()
-                    if not line:
-                        time.sleep(1)
-                        continue
-                    match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line)
-                    if match:
-                        new_tunnel_url = match.group(0)
-                        output_m3u8_url = f"{new_tunnel_url}/hls/stream.m3u8"
-                        break
+                # فحص مخرجات النفق بشكل آمن ودون الوقوع في فخ التجميد التلقائي
+                attempts = 0
+                while attempts < 25:
+                    try:
+                        line = cf_process.stderr.readline()
+                        match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line)
+                        if match:
+                            new_tunnel_url = match.group(0)
+                            output_m3u8_url = f"{new_tunnel_url}/hls/stream.m3u8"
+                            break
+                    except Exception as e:
+                        pass
+                    time.sleep(0.5)
+                    attempts += 1
+
+                # في حال فشل القراءة الفورية للنفق، سنعطي رابطاً افتراضياً مؤقتاً لتجنب تعطل الواجهة
+                if output_m3u8_url == "Not Generated Yet":
+                    output_m3u8_url = "Generating Tunnel URL... Please refresh in a moment"
 
                 stream_status = "Opening Media Connection (Anti-Freeze)..."
                 try:
-                    # إضافة ميزات الكاش ومحللات ديموكس لدعم روابط Xtream والروابط المباشرة التي لا تنتهي بـ m3u8
                     vlc_cmd = [
                         "cvlc", 
                         "--fullscreen", 
@@ -269,12 +277,10 @@ jobs:
 
                     stream_status = "Streaming Player Screen Live"
                     
-                    # ضبط أبعاد الفيديو إجبارياً للـ 16:9 وتصفية الإطارات لإنهاء مشكلة التقطيع والتشويه
                     video_filters = ["-vf", "scale=1280:720,setdar=16/9"]
                     if watermark_text:
                         video_filters = ["-vf", f"scale=1280:720,setdar=16/9,drawtext=text='{watermark_text}':x=15:y=h-th-15:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.5"]
 
-                    # إعدادات متطورة لـ FFmpeg مدعومة بمعاملات البث المستمر دون توقف (Realtime / Low Latency)
                     record_cmd = [
                         "ffmpeg", "-f", "x11grab", "-video_size", "1280x720", "-framerate", "25", "-i", ":99.0",
                         "-f", "pulse", "-ac", "2", "-i", "VirtualSink.monitor",
