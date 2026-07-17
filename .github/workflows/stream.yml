@@ -238,7 +238,7 @@ jobs:
                     const source = document.getElementById('source_url').value;
                     const text = document.getElementById('watermark').value;
                     if(!source) { alert('الرجاء إدخال رابط البث أولاً!'); return; }
-                    document.getElementById('status').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> جاري معالجة البث ومنع التقطيع...';
+                    document.getElementById('status').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> جاري إنشاء نفق مستقر وبدء البث...';
                     
                     fetch('/api/start', {
                         method: 'POST',
@@ -265,7 +265,7 @@ jobs:
                     statusInterval = setInterval(() => {
                         fetch('/api/status').then(res => res.json()).then(data => {
                             document.getElementById('status').innerText = data.status;
-                            if(data.output !== "Not Generated Yet") {
+                            if(data.output !== "Not Generated Yet" && !data.output.includes("Generating")) {
                                 document.getElementById('output_url').innerText = data.output;
                             } else if (data.status === "Stopped") {
                                 document.getElementById('output_url').innerText = 'في انتظار بدء البث...';
@@ -341,25 +341,34 @@ jobs:
                 global stream_status, vlc_process, ffmpeg_process, cf_process, output_m3u8_url
                 stream_status = "Generating New Cloudflare Tunnel..."
                 
-                cmd = ["cloudflared", "tunnel", "--url", "http://localhost:5000"]
-                cf_process = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
+                # تشغيل نفق Cloudflare وحفظ مخرجاته في ملف لوج مؤقت لتجنب تجميد الـ buffer
+                cf_log_file = "cloudflared.log"
+                if os.path.exists(cf_log_file): os.remove(cf_log_file)
                 
+                cmd = ["cloudflared", "tunnel", "--url", "http://localhost:5000"]
+                with open(cf_log_file, "w") as out:
+                    cf_process = subprocess.Popen(cmd, stderr=out, stdout=subprocess.DEVNULL, text=True)
+                
+                # قراءة الملف حتى استخراج الرابط بشكل صحيح
                 attempts = 0
-                while attempts < 25:
-                    try:
-                        line = cf_process.stderr.readline()
-                        match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line)
-                        if match:
-                            new_tunnel_url = match.group(0)
-                            output_m3u8_url = f"{new_tunnel_url}/hls/stream.m3u8"
-                            break
-                    except Exception:
-                        pass
-                    time.sleep(0.5)
+                tunnel_found = False
+                while attempts < 30:
+                    time.sleep(1)
                     attempts += 1
+                    if os.path.exists(cf_log_file):
+                        with open(cf_log_file, "r") as f:
+                            content = f.read()
+                            match = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', content)
+                            if match:
+                                new_tunnel_url = match.group(0)
+                                # إضافة تأخير طفيف مدته 3 ثوانٍ للتأكد من ربط نطاق DNS لـ Cloudflare بالكامل عالمياً لتجنب NXDOMAIN
+                                time.sleep(3)
+                                output_m3u8_url = f"{new_tunnel_url}/hls/stream.m3u8"
+                                tunnel_found = True
+                                break
 
-                if output_m3u8_url == "Not Generated Yet":
-                    output_m3u8_url = "Generating Tunnel URL... Please refresh in a moment"
+                if not tunnel_found:
+                    output_m3u8_url = "Generating Tunnel URL... Please wait 5 seconds and refresh"
 
                 stream_status = "Opening Media Connection (Anti-Freeze)..."
                 try:
