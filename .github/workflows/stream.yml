@@ -70,7 +70,7 @@ jobs:
         ffmpeg_process = None
         cf_process = None
 
-        # شاشة وهمية عريضة
+        # شاشة وهمية قياسية ثابتة الاستقرار
         subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x720x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(2)
         os.environ["DISPLAY"] = ":99"
@@ -108,9 +108,9 @@ jobs:
         </head>
         <body>
             <div class="container">
-                <h1>🚀 Go Streamer (VLC Player Mode)</h1>
+                <h1>🚀 Go Streamer (VLC Stable Mode)</h1>
                 <div class="form-group">
-                    <label>رابط البث أو الفيديو المراد تشغيله (M3U8 / MPD / روابط مباشرة):</label>
+                    <label>رابط البث أو الفيديو المراد تشغيله (يدعم جميع الروابط المباشرة والـ M3U8):</label>
                     <input type="text" id="source_url" placeholder="ضع رابط البث المباشر هنا...">
                 </div>
                 <div class="form-group">
@@ -124,7 +124,7 @@ jobs:
                 <div class="status-card">
                     <div>الحالة الحالية: <span id="status" style="font-weight:bold; color:#34d399;">مستعد</span></div>
                     <br>
-                    <div>رابط البث السحابي الجديد الفريد (M3U8):</div>
+                    <div>رابط البث السحابي الجديد المستقر (M3U8):</div>
                     <div id="output_url" class="url-box">في انتظار بدء البث...</div>
                 </div>
             </div>
@@ -134,7 +134,7 @@ jobs:
                     const source = document.getElementById('source_url').value;
                     const text = document.getElementById('watermark').value;
                     if(!source) { alert('الرجاء إدخال رابط البث أولاً!'); return; }
-                    document.getElementById('status').innerText = 'جاري تشغيل الرابط وتوسيع الفيديو وملء الشاشة...';
+                    document.getElementById('status').innerText = 'جاري معالجة الرابط المستهدف ومنع التقطيع...';
                     
                     fetch('/api/start', {
                         method: 'POST',
@@ -244,9 +244,9 @@ jobs:
                         output_m3u8_url = f"{new_tunnel_url}/hls/stream.m3u8"
                         break
 
-                stream_status = "Opening Media Player (VLC Fullscreen)..."
+                stream_status = "Opening Media Connection (Anti-Freeze)..."
                 try:
-                    # تحديث خيارات VLC لإجبار تمديد الفيديو لملء أبعاد الشاشة 16:9 بالكامل وبدون إطار أسود
+                    # إضافة ميزات الكاش ومحللات ديموكس لدعم روابط Xtream والروابط المباشرة التي لا تنتهي بـ m3u8
                     vlc_cmd = [
                         "cvlc", 
                         "--fullscreen", 
@@ -254,29 +254,35 @@ jobs:
                         "--no-qt-fs-controller", 
                         "--video-wallpaper",
                         "--aspect-ratio=16:9",
-                        "--no-autoscale",
-                        "--zoom=1.0",
+                        "--network-caching=3000",
+                        "--file-caching=3000",
+                        "--live-caching=3000",
+                        "--drop-late-frames",
+                        "--skip-frames",
                         source_url
                     ]
                     vlc_process = subprocess.Popen(vlc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    time.sleep(3)
+                    time.sleep(4)
 
-                    # محاكاة ضغط أمر تكبير وإخفاء أي حواف متبقية عبر xdotool لضمان التمدد المطلق
                     subprocess.run(["xdotool", "search", "--sync", "--onlyvisible", "--class", "vlc", "windowactivate", "key", "f"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    time.sleep(2)
+                    time.sleep(1)
 
                     stream_status = "Streaming Player Screen Live"
-                    video_filters = []
+                    
+                    # ضبط أبعاد الفيديو إجبارياً للـ 16:9 وتصفية الإطارات لإنهاء مشكلة التقطيع والتشويه
+                    video_filters = ["-vf", "scale=1280:720,setdar=16/9"]
                     if watermark_text:
-                        video_filters = ["-vf", f"drawtext=text='{watermark_text}':x=15:y=h-th-15:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.5"]
+                        video_filters = ["-vf", f"scale=1280:720,setdar=16/9,drawtext=text='{watermark_text}':x=15:y=h-th-15:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.5"]
 
+                    # إعدادات متطورة لـ FFmpeg مدعومة بمعاملات البث المستمر دون توقف (Realtime / Low Latency)
                     record_cmd = [
                         "ffmpeg", "-f", "x11grab", "-video_size", "1280x720", "-framerate", "25", "-i", ":99.0",
                         "-f", "pulse", "-ac", "2", "-i", "VirtualSink.monitor",
-                        "-c:v", "libx264", "-preset", "ultrafast", "-g", "50"
+                        "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-g", "50",
+                        "-b:v", "1500k", "-maxrate", "1500k", "-bufsize", "3000k"
                     ] + video_filters + [
                         "-c:a", "aac", "-b:a", "128k",
-                        "-f", "hls", "-hls_time", "2", "-hls_list_size", "5", "-hls_flags", "delete_segments",
+                        "-f", "hls", "-hls_time", "2", "-hls_list_size", "6", "-hls_flags", "delete_segments+split_by_time",
                         os.path.join(HLS_DIR, "stream.m3u8")
                     ]
                     ffmpeg_process = subprocess.Popen(record_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
